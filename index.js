@@ -31,7 +31,7 @@ const WORD_POOL = [
 
   // duygular/durumlar
   "yalnızlık","merak","şaşkınlık","kararsızlık","Makinalaşmak","huzur","gerilim","sıkıntı",
-  "rahatlık","boşvermişlik","acele","duraksama","çelişki","uyumsuzluk",
+  "rahatlık","boşvermişlik","acele","duraksama","çelişki","uyumsuzluk","pencizorno","Arena ne amq",
 
   // zaman/mekan kırıntıları
   "bugün","yarın","şimdi","önce","sonra","içeride","dışarıda","Oral Mühendisi","arada","üstünde","altında",
@@ -120,4 +120,5 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
