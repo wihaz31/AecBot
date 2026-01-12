@@ -9,9 +9,9 @@ const client = new Client({
   ],
 });
 
-const TARGET_USER_ID = "HEDEF_KULLANICI_ID";
-const EMOJI_1 = ":chair:";
-const EMOJI_2 = ":knot:";
+const TARGET_USER_ID = "403940186494599168";
+const EMOJI_1 = "🪑"; // chair
+const EMOJI_2 = "🪢"; // knot
 
 client.once("ready", () => console.log(`Bot aktif: ${client.user.tag}`));
 
@@ -32,3 +32,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
