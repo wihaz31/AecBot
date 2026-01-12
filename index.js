@@ -13,15 +13,15 @@ const WORD_POOL = [
   "karışıyor","yaklaşıyor","kaçıyor","izliyor","bozuluyor","süzülüyor",
   "dağılıyor","toplanıyor","yoruluyor","çözülüyor","kapanıyor","açılıyor",
   "sallanıyor","kayboluyor","beliriyor","sürükleniyor","çarpıyor","dokunuyor",
-  "duraksıyor","akıyor","titreşiyor",
+  "duraksıyor","akıyor","titreşiyor","blitzcrank"
 
   // isimler
   "zaman","duvar","ışık","ses","gece","gölge","masa","düşünce","kapı","yol",
-  "rüya","kelime","boşluk","his","an","iz","bakış","adım","parça","ayna",
-  "çizgi","nokta","hava","taş","su","cam","koridor","soru","cevap","yankı",
+  "rüya","kelime","boşluk","his","an","yasuo","porno","iz","bakış","adım","parça","ayna",
+  "çizgi","nokta","hava","taş","su","cam","koridor","faker","soru","cevap","yankı",
 
   // sıfatlar
-  "garip","sessiz","yansız","bulanık","eski","yeni","kırık","uzak","yakın",
+  "garip","sessiz","yansız","bulanık","eski","yeni","kırık","The UNKILLABLE DEMONKING","uzak","yakın",
   "belirsiz","rastgele","soğuk","sıcak","yavaş","ani","derin","yüzeysel",
   "karanlık","aydınlık","eksik","fazla","gizli","açık",
 
@@ -30,11 +30,11 @@ const WORD_POOL = [
   "bazen","sessizce","yavaşça","aniden","uzaktan","yakından","kendi kendine",
 
   // duygular/durumlar
-  "yalnızlık","merak","şaşkınlık","kararsızlık","huzur","gerilim","sıkıntı",
+  "yalnızlık","merak","şaşkınlık","kararsızlık","Makinalaşmak","huzur","gerilim","sıkıntı",
   "rahatlık","boşvermişlik","acele","duraksama","çelişki","uyumsuzluk",
 
   // zaman/mekan kırıntıları
-  "bugün","yarın","şimdi","önce","sonra","içeride","dışarıda","arada","üstünde","altında",
+  "bugün","yarın","şimdi","önce","sonra","içeride","dışarıda","Oral Mühendisi","arada","üstünde","altında",
 ];
 
 function randomSentence() {
@@ -120,3 +120,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
