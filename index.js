@@ -1,5 +1,17 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
+// === KOYEB FREE HACK: BOŞ HTTP SERVER ===
+const http = require("http");
+
+const PORT = process.env.PORT || 8000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("OK");
+}).listen(PORT, () => {
+  console.log(`HTTP server listening on ${PORT}`);
+});
+
 
 /* =========================
    AYARLAR
@@ -448,3 +460,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
