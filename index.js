@@ -87,60 +87,102 @@ const BOT_RECENT_LIMIT = 200; // botun son 200 çıktısını hatırla
    FALLBACK WORD POOL (Markov yeterli olmazsa)
 ========================= */
 const WORD_POOL = [
-  "aga","kanka","bro","reis","moruk","abi","hocam","hırt","excel mühendisi",
-  "sal","boşver","takıl","trip","cringe","based","aşkım çok pardon don",
-  "random","kaos","aşırı","efsane","rezalet","offfff",
-  "net","aynen","ayniyiz","yokartık","şaka mı","benim kafam felaket",
-  "low","high","kopuyorum","patladım","susuyorum","oldu aşkımmm",
-  "niye böyle","noluyo","ne alaka","ciddiyim","düşük anahtar rastgele",
-
-  // === İNGİLİZCE / GLOBAL SLANG ===
-  "bro","dude","bruh","lol","lmao","wtf","idk","imo",
-  "fr","no cap","cap","sheesh","mid","npc","lowkey",
-  "main character","skill issue","touch grass",
-  "gg","ez","ff","go next","tryhard","toxic",
-  "hardstuck","smurf","boosted","nerf","buff",
-
-  // === LEAGUE OF LEGENDS TERİMLERİ ===
-  "yasuo","yone","zed","akali","lee sin","viego",
-  "ahri","jinx","caitlyn","thresh","lux","riven",
-  "faker","keria","gumayusi","derken orda kulenin altına atıyor hahaaa",
-  "soloQ","ranked","normal","aram","pankyyyy",
-  "midlane","toplane","botlane","jungle","support",
-  "gank","counter","outplay","int","feed","carry",
-  "snowball","oneshot","burst","kite","peel","rakiplerinin ekmeğine yağğğğ sürüyor",
-  "macro","micro","mechanic","draft","meta",
-  "bronze","silver","gold","plat","emerald","diamond",
-  "master","grandmaster","challenger","THE UNKILLABLE DEMON KING",
-
-  // === LOL + SLANG KARIŞIK ===
-  "yasuo","faker","mid diff","jg diff",
-  "bot gap","report mid","open mid","ff15",
-  "1v9","hard carry","int","mental boom",
-  "tilt","rank","lp gitti",
-  "smurf oe","boostlanmış","off meta",
-
-  "düşünüyor","bekliyor","anlamıyor","soruyor","unutuyor","hatırlıyor",
-  "karışıyor","yaklaşıyor","kaçıyor","izliyor","bozuluyor","süzülüyor",
-  "dağılıyor","toplanıyor","yoruluyor","çözülüyor","kapanıyor","açılıyor",
-  "sallanıyor","kayboluyor","beliriyor","sürükleniyor","çarpıyor","dokunuyor",
-  "duraksıyor","akıyor","titreşiyor","blitzcrank",
-
-  "zaman","duvar","ışık","ses","gece","gölge","masa","düşünce","kapı","yol",
-  "rüya","kelime","boşluk","his","an","yasuo","porno","iz","bakış","adım","parça","ayna",
-  "çizgi","nokta","hava","taş","su","cam","koridor","faker","soru","cevap","yankı",
-
-  "garip","sessiz","yansız","bulanık","eski","yeni","kırık","The UNKILLABLE DEMONKING","uzak","yakın",
-  "belirsiz","rastgele","soğuk","sıcak","yavaş","ani","derin","yüzeysel",
-  "karanlık","aydınlık","eksik","fazla","gizli","açık",
-
-  "birden","sanki","hala","aslında","belki","nedense","şu an","orada","burada",
-  "bazen","sessizce","yavaşça","aniden","uzaktan","yakından","kendi kendine",
-
-  "yalnızlık","merak","şaşkınlık","kararsızlık","Makinalaşmak","huzur","gerilim","sıkıntı",
-  "rahatlık","boşvermişlik","acele","duraksama","çelişki","uyumsuzluk","pencizorno","Arena ne amq",
-
-  "bugün","yarın","şimdi","önce","sonra","içeride","dışarıda","Oral Mühendisi","arada","üstünde","altında",
+  "aga",
+  "kanka",
+  "bro",
+  "reis",
+  "moruk",
+  "abi",
+  "hocam",
+  "sal",
+  "boşver",
+  "takıl",
+  "trip",
+  "cringe",
+  "based",
+  "random",
+  "kaos",
+  "efsane",
+  "rezalet",
+  "offfff",
+  "aynen",
+  "yokartık",
+  "şaka mı",
+  "noluyo",
+  "ne alaka",
+  "ciddiyim",
+  "bro",
+  "dude",
+  "bruh",
+  "lol",
+  "lmao",
+  "wtf",
+  "idk",
+  "imo",
+  "fr",
+  "no cap",
+  "cap",
+  "sheesh",
+  "mid",
+  "npc",
+  "lowkey",
+  "skill issue",
+  "touch grass",
+  "gg",
+  "ez",
+  "ff",
+  "go next",
+  "tryhard",
+  "toxic",
+  "hardstuck",
+  "smurf",
+  "boosted",
+  "nerf",
+  "buff",
+  "yasuo",
+  "yone",
+  "zed",
+  "akali",
+  "lee sin",
+  "viego",
+  "ahri",
+  "jinx",
+  "caitlyn",
+  "thresh",
+  "lux",
+  "riven",
+  "faker",
+  "keria",
+  "gumayusi",
+  "soloQ",
+  "ranked",
+  "normal",
+  "aram",
+  "midlane",
+  "toplane",
+  "botlane",
+  "jungle",
+  "support",
+  "gank",
+  "outplay",
+  "int",
+  "feed",
+  "carry",
+  "snowball",
+  "oneshot",
+  "burst",
+  "kite",
+  "peel",
+  "macro",
+  "micro",
+  "meta",
+  "bronze",
+  "silver",
+  "gold",
+  "emerald",
+  "diamond",
+  "master",
+  "challenger",
 ];
 
 /* =========================
@@ -198,13 +240,13 @@ function tooSimilar(candidate) {
   const candSet = new Set(candWords);
 
   // Performans: hafızadan rastgele örneklerle kıyasla
-  const samples = Math.min(80, memory.length);
+  const samples = Math.min(90, memory.length);
   for (let i = 0; i < samples; i++) {
     const m = normalizeText(memory[Math.floor(Math.random() * memory.length)]);
     if (!m) continue;
 
-    // ilk 20 karakter aynıysa aşırı benzer
-    if (m.slice(0, 20) === cand.slice(0, 20)) return true;
+    // ilk 22 karakter aynıysa aşırı benzer
+    if (m.slice(0, 22) === cand.slice(0, 22)) return true;
 
     const mWords = m.split(" ").filter(Boolean);
     const mSet = new Set(mWords);
@@ -216,23 +258,11 @@ function tooSimilar(candidate) {
     const jacc = union ? inter / union : 0;
 
     // kısa cümlede daha sıkı, uzunda daha esnek
-    const threshold = candWords.length <= 8 ? 0.60 : 0.72;
+    const threshold = candWords.length <= 8 ? 0.50 : 0.62;
     if (jacc >= threshold) return true;
   }
 
   return false;
-}
-
-// Markov çıktısını “azıcık boz”: kopya ihtimalini düşürür
-function injectNoise(words) {
-  if (Math.random() > 0.75) return words; // %25 dokunma
-
-  const injectCount = Math.random() < 0.35 ? 2 : 1;
-  for (let i = 0; i < injectCount; i++) {
-    const idx = Math.floor(Math.random() * words.length);
-    words[idx] = WORD_POOL[Math.floor(Math.random() * WORD_POOL.length)];
-  }
-  return words;
 }
 
 function tokenize(text) {
@@ -260,7 +290,74 @@ function buildMarkov3(messages) {
   return map;
 }
 
-// === KOPYA/ÇOK BENZER ENGELLEMELİ MARKOV ===
+/* =========================
+   CHAT'TEN KELİME ALMA (WORD_POOL YERİNE)
+========================= */
+function randomChatWord() {
+  if (memory.length === 0) return null;
+
+  for (let i = 0; i < 12; i++) {
+    const msg = randomFrom(memory);
+    const words = tokenize(msg);
+    if (words.length > 0) return randomFrom(words);
+  }
+  return null;
+}
+
+/* =========================
+   NOISE: CHAT'TEN KELİMEYLE BOZMA (EKSTRA KELİME EKLEYEBİLİR)
+========================= */
+function injectNoiseFromChat(words) {
+  // %15 hiç dokunma (tamamen bozmak istemezsen)
+  if (Math.random() < 0.15) return words;
+
+  // hedef: en az 3 kelime değişsin, bazen 4–6
+  const minReplace = 3;
+  const extra = Math.floor(Math.random() * 4); // 0..3
+  const replaceCount = Math.min(words.length, minReplace + extra); // 3..6 (kelime sayısına göre)
+
+  const usedIdx = new Set();
+  for (let i = 0; i < replaceCount; i++) {
+    let idx = Math.floor(Math.random() * words.length);
+    let guard = 0;
+    while (usedIdx.has(idx) && guard++ < 10) idx = Math.floor(Math.random() * words.length);
+    usedIdx.add(idx);
+
+    const w = randomChatWord() ?? randomFrom(WORD_POOL);
+    words[idx] = w;
+  }
+
+  // %35 ihtimalle 1–2 kelime ekle
+  if (Math.random() < 0.35 && words.length < 16) {
+    const addCount = Math.random() < 0.5 ? 1 : 2;
+    for (let i = 0; i < addCount; i++) {
+      const idx = Math.floor(Math.random() * (words.length + 1));
+      const w = randomChatWord() ?? randomFrom(WORD_POOL);
+      words.splice(idx, 0, w);
+    }
+  }
+
+  // %20 ihtimalle 1 kelime sil
+  if (Math.random() < 0.2 && words.length > 6) {
+    const idx = Math.floor(Math.random() * words.length);
+    words.splice(idx, 1);
+  }
+
+  // %35 ihtimalle küçük karıştırma (2 swap)
+  if (Math.random() < 0.35 && words.length >= 6) {
+    for (let k = 0; k < 2; k++) {
+      const i = Math.floor(Math.random() * words.length);
+      const j = Math.floor(Math.random() * words.length);
+      [words[i], words[j]] = [words[j], words[i]];
+    }
+  }
+
+  return words;
+}
+
+/* =========================
+   KOPYA/ÇOK BENZER ENGELLEMELİ MARKOV
+========================= */
 function markovSentence() {
   if (memory.length < 60) {
     const fb = randomSentence();
@@ -280,8 +377,8 @@ function markovSentence() {
     return fb;
   }
 
-  // 20 deneme: benzer/kopyaysa yeniden üret
-  for (let attempt = 0; attempt < 20; attempt++) {
+  // 25 deneme: benzer/kopyaysa yeniden üret
+  for (let attempt = 0; attempt < 25; attempt++) {
     const targetLen = Math.floor(Math.random() * 6) + 5; // 5–10
 
     const start = randomFrom(keys).split("|");
@@ -294,7 +391,15 @@ function markovSentence() {
       out.push(randomFrom(nexts));
     }
 
-    out = injectNoise(out);
+    // Chat kelimeleriyle boz
+    out = injectNoiseFromChat(out);
+
+    // küçük bir karıştırma (%15)
+    if (Math.random() < 0.15 && out.length >= 6) {
+      const i = Math.floor(Math.random() * out.length);
+      const j = Math.floor(Math.random() * out.length);
+      [out[i], out[j]] = [out[j], out[i]];
+    }
 
     let s = out.join(" ");
     s = s.charAt(0).toUpperCase() + s.slice(1);
@@ -345,7 +450,9 @@ async function seedByDays(channel, days = 180, maxMessages = 40000) {
     const rate = Math.round(collected.length / elapsedSec);
 
     console.log(
-      `Seed progress: ${collected.length}/${maxMessages} msgs | fetch=${seedState.fetchCount} | ${formatDuration(elapsedMs)} | ~${rate} msg/sn`
+      `Seed progress: ${collected.length}/${maxMessages} msgs | fetch=${seedState.fetchCount} | ${formatDuration(
+        elapsedMs
+      )} | ~${rate} msg/sn`
     );
 
     seedState.collected = collected.length;
