@@ -1,17 +1,18 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
+
 // === KOYEB FREE HACK: BOŞ HTTP SERVER ===
 const http = require("http");
-
 const PORT = process.env.PORT || 8000;
 
-http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("OK");
-}).listen(PORT, () => {
-  console.log(`HTTP server listening on ${PORT}`);
-});
-
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("OK");
+  })
+  .listen(PORT, () => {
+    console.log(`HTTP server listening on ${PORT}`);
+  });
 
 /* =========================
    AYARLAR
@@ -21,8 +22,8 @@ http.createServer((req, res) => {
 const SEED_CHANNEL_ID = "705537838770421761";
 
 // === Seed parametreleri ===
-const SEED_DAYS = 180;      // son 180 gün
-const SEED_MAX = 40000;     // en fazla 40k mesaj çek
+const SEED_DAYS = 180; // son 180 gün
+const SEED_MAX = 40000; // en fazla 40k mesaj çek
 
 // === Hafıza (canlı güncellenir) ===
 const MAX_MEMORY_MESSAGES = 40000;
@@ -77,6 +78,11 @@ function formatDuration(ms) {
 const memory = [];
 const MAX_WORDS_PER_MESSAGE = 40;
 
+// === KOPYA/ÇOK BENZER ENGELLEME ===
+const memorySet = new Set(); // hafızadaki mesajların normalize edilmiş set'i
+const botRecentSet = new Set(); // botun son attıklarını tut
+const BOT_RECENT_LIMIT = 200; // botun son 200 çıktısını hatırla
+
 /* =========================
    FALLBACK WORD POOL (Markov yeterli olmazsa)
 ========================= */
@@ -113,31 +119,27 @@ const WORD_POOL = [
   "1v9","hard carry","int","mental boom",
   "tilt","rank","lp gitti",
   "smurf oe","boostlanmış","off meta",
+
   "düşünüyor","bekliyor","anlamıyor","soruyor","unutuyor","hatırlıyor",
   "karışıyor","yaklaşıyor","kaçıyor","izliyor","bozuluyor","süzülüyor",
   "dağılıyor","toplanıyor","yoruluyor","çözülüyor","kapanıyor","açılıyor",
   "sallanıyor","kayboluyor","beliriyor","sürükleniyor","çarpıyor","dokunuyor",
   "duraksıyor","akıyor","titreşiyor","blitzcrank",
 
-  // isimler
   "zaman","duvar","ışık","ses","gece","gölge","masa","düşünce","kapı","yol",
   "rüya","kelime","boşluk","his","an","yasuo","porno","iz","bakış","adım","parça","ayna",
   "çizgi","nokta","hava","taş","su","cam","koridor","faker","soru","cevap","yankı",
 
-  // sıfatlar
   "garip","sessiz","yansız","bulanık","eski","yeni","kırık","The UNKILLABLE DEMONKING","uzak","yakın",
   "belirsiz","rastgele","soğuk","sıcak","yavaş","ani","derin","yüzeysel",
   "karanlık","aydınlık","eksik","fazla","gizli","açık",
 
-  // zarflar/bağlaçlar
   "birden","sanki","hala","aslında","belki","nedense","şu an","orada","burada",
   "bazen","sessizce","yavaşça","aniden","uzaktan","yakından","kendi kendine",
 
-  // duygular/durumlar
   "yalnızlık","merak","şaşkınlık","kararsızlık","Makinalaşmak","huzur","gerilim","sıkıntı",
   "rahatlık","boşvermişlik","acele","duraksama","çelişki","uyumsuzluk","pencizorno","Arena ne amq",
 
-  // zaman/mekan kırıntıları
   "bugün","yarın","şimdi","önce","sonra","içeride","dışarıda","Oral Mühendisi","arada","üstünde","altında",
 ];
 
@@ -156,6 +158,81 @@ function randomSentence() {
   s = s.charAt(0).toUpperCase() + s.slice(1);
   s += Math.random() < 0.2 ? "..." : ".";
   return s;
+}
+
+// normalize: birebir/benzerlik kontrolü için
+function normalizeText(s) {
+  return (s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[.?!…]+$/g, "");
+}
+
+// Botun çıktısını yakın geçmişe yaz
+function rememberBotOutput(text) {
+  const n = normalizeText(text);
+  if (!n) return;
+
+  botRecentSet.add(n);
+  if (botRecentSet.size > BOT_RECENT_LIMIT) {
+    const first = botRecentSet.values().next().value;
+    botRecentSet.delete(first);
+  }
+}
+
+// Çok benzer mi? (birebir + jaccard benzerliği + kısa prefix)
+function tooSimilar(candidate) {
+  const cand = normalizeText(candidate);
+  if (!cand) return true;
+
+  // birebir hafızadaysa
+  if (memorySet.has(cand)) return true;
+
+  // bot yakın zamanda aynı şeyi attıysa
+  if (botRecentSet.has(cand)) return true;
+
+  const candWords = cand.split(" ").filter(Boolean);
+  if (candWords.length < 4) return true;
+
+  const candSet = new Set(candWords);
+
+  // Performans: hafızadan rastgele örneklerle kıyasla
+  const samples = Math.min(80, memory.length);
+  for (let i = 0; i < samples; i++) {
+    const m = normalizeText(memory[Math.floor(Math.random() * memory.length)]);
+    if (!m) continue;
+
+    // ilk 20 karakter aynıysa aşırı benzer
+    if (m.slice(0, 20) === cand.slice(0, 20)) return true;
+
+    const mWords = m.split(" ").filter(Boolean);
+    const mSet = new Set(mWords);
+
+    let inter = 0;
+    for (const w of candSet) if (mSet.has(w)) inter++;
+
+    const union = candSet.size + mSet.size - inter;
+    const jacc = union ? inter / union : 0;
+
+    // kısa cümlede daha sıkı, uzunda daha esnek
+    const threshold = candWords.length <= 8 ? 0.60 : 0.72;
+    if (jacc >= threshold) return true;
+  }
+
+  return false;
+}
+
+// Markov çıktısını “azıcık boz”: kopya ihtimalini düşürür
+function injectNoise(words) {
+  if (Math.random() > 0.75) return words; // %25 dokunma
+
+  const injectCount = Math.random() < 0.35 ? 2 : 1;
+  for (let i = 0; i < injectCount; i++) {
+    const idx = Math.floor(Math.random() * words.length);
+    words[idx] = WORD_POOL[Math.floor(Math.random() * WORD_POOL.length)];
+  }
+  return words;
 }
 
 function tokenize(text) {
@@ -183,31 +260,56 @@ function buildMarkov3(messages) {
   return map;
 }
 
+// === KOPYA/ÇOK BENZER ENGELLEMELİ MARKOV ===
 function markovSentence() {
-  if (memory.length < 60) return randomSentence();
+  if (memory.length < 60) {
+    const fb = randomSentence();
+    rememberBotOutput(fb);
+    return fb;
+  }
 
+  // yakın geçmişi modelden çıkar
   const usable =
     memory.length > RECENT_EXCLUDE ? memory.slice(0, memory.length - RECENT_EXCLUDE) : memory;
 
   const model = buildMarkov3(usable);
   const keys = Array.from(model.keys());
-  if (!keys.length) return randomSentence();
-
-  const targetLen = Math.floor(Math.random() * 6) + 5;
-  const start = randomFrom(keys).split("|");
-  const out = [...start];
-
-  while (out.length < targetLen) {
-    const key = `${out[out.length - 3]}|${out[out.length - 2]}|${out[out.length - 1]}`;
-    const nexts = model.get(key);
-    if (!nexts || nexts.length === 0) break;
-    out.push(randomFrom(nexts));
+  if (!keys.length) {
+    const fb = randomSentence();
+    rememberBotOutput(fb);
+    return fb;
   }
 
-  let s = out.join(" ");
-  s = s.charAt(0).toUpperCase() + s.slice(1);
-  s += Math.random() < 0.2 ? "..." : ".";
-  return s;
+  // 20 deneme: benzer/kopyaysa yeniden üret
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const targetLen = Math.floor(Math.random() * 6) + 5; // 5–10
+
+    const start = randomFrom(keys).split("|");
+    let out = [...start];
+
+    while (out.length < targetLen) {
+      const key = `${out[out.length - 3]}|${out[out.length - 2]}|${out[out.length - 1]}`;
+      const nexts = model.get(key);
+      if (!nexts || nexts.length === 0) break;
+      out.push(randomFrom(nexts));
+    }
+
+    out = injectNoise(out);
+
+    let s = out.join(" ");
+    s = s.charAt(0).toUpperCase() + s.slice(1);
+    s += Math.random() < 0.2 ? "..." : ".";
+
+    if (!tooSimilar(s)) {
+      rememberBotOutput(s);
+      return s;
+    }
+  }
+
+  // Olmadıysa fallback
+  const fb = randomSentence();
+  rememberBotOutput(fb);
+  return fb;
 }
 
 /* =========================
@@ -261,10 +363,7 @@ async function seedByDays(channel, days = 180, maxMessages = 40000) {
     try {
       msgs = await channel.messages.fetch(opts);
     } catch (e) {
-      const retryAfter =
-        (e?.data && e.data.retry_after) ||
-        e?.retry_after ||
-        null;
+      const retryAfter = (e?.data && e.data.retry_after) || e?.retry_after || null;
 
       if (retryAfter) {
         const waitMs = Math.ceil(retryAfter * 1000) + 200;
@@ -316,10 +415,15 @@ async function seedByDays(channel, days = 180, maxMessages = 40000) {
     beforeId = msgs.last().id;
   }
 
+  // memory doldur
   memory.length = 0;
   memory.push(...collected);
 
   while (memory.length > MAX_MEMORY_MESSAGES) memory.shift();
+
+  // memorySet doldur (birebir engelleme için)
+  memorySet.clear();
+  for (const t of memory) memorySet.add(normalizeText(t));
 
   logProgress(true);
 
@@ -334,11 +438,7 @@ async function seedByDays(channel, days = 180, maxMessages = 40000) {
    DISCORD CLIENT
 ========================= */
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 client.once("ready", async () => {
@@ -404,8 +504,7 @@ client.on("messageCreate", async (message) => {
           ? "❌ HATA"
           : "⏸️ DURDU";
 
-        const rate =
-          Math.round(seedState.collected / Math.max(1, Math.floor(elapsed / 1000)));
+        const rate = Math.round(seedState.collected / Math.max(1, Math.floor(elapsed / 1000)));
 
         await message.reply(
           [
@@ -415,7 +514,9 @@ client.on("messageCreate", async (message) => {
             `Fetch: ${seedState.fetchCount}`,
             `Süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
             seedState.error ? `Hata: ${seedState.error}` : null,
-          ].filter(Boolean).join("\n")
+          ]
+            .filter(Boolean)
+            .join("\n")
         );
         return;
       }
@@ -423,8 +524,15 @@ client.on("messageCreate", async (message) => {
 
     // === HAFIZA CANLI GÜNCELLEME (SADECE SEED KANALI) ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
+      const norm = normalizeText(content);
+
       memory.push(content);
-      if (memory.length > MAX_MEMORY_MESSAGES) memory.shift();
+      memorySet.add(norm);
+
+      if (memory.length > MAX_MEMORY_MESSAGES) {
+        const removed = memory.shift();
+        memorySet.delete(normalizeText(removed));
+      }
     }
 
     // === BOT MESAJINA REPLY ===
@@ -453,11 +561,9 @@ client.on("messageCreate", async (message) => {
 
     if (!has1) await message.react(EMOJI_1);
     if (!has2) await message.react(EMOJI_2);
-
   } catch (e) {
     console.error(e);
   }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-
