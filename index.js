@@ -89,7 +89,7 @@ http.createServer(async (req, res) => {
 const SEED_CHANNEL_ID = "705537838770421761";
 
 // === Seed parametreleri ===
-const SEED_DAYS = 240; // son 240 gün
+const SEED_DAYS = 180; // son 180 gün
 const SEED_MAX = 40000; // en fazla 40k mesaj çek
 
 // === Hafıza (canlı güncellenir) ===
@@ -485,9 +485,9 @@ function markovSentence() {
 }
 
 /* =========================
-   SEED: SON 240 GÜN (MAX 40K) + PROGRESS + RATE LIMIT
+   SEED: SON 180 GÜN (MAX 40K) + PROGRESS + RATE LIMIT
 ========================= */
-async function seedByDays(channel, days = 240, maxMessages = 40000) {
+async function seedByDays(channel, days = 180, maxMessages = 40000) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
   const collected = [];
@@ -582,7 +582,7 @@ async function seedByDays(channel, days = 240, maxMessages = 40000) {
     else logProgress(false);
 
     if (reachedCutoff) {
-      console.log("Seed: cutoff tarihine ulaşıldı (240 gün sınırı).");
+      console.log("Seed: cutoff tarihine ulaşıldı (180 gün sınırı).");
       break;
     }
 
@@ -820,4 +820,5 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
