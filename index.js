@@ -123,8 +123,8 @@ function squash(s) {
 
 // dini kelimeler (istersen genişlet)
 const RELIGIOUS_TERMS = [
-  "allah","tanri","peygamber","muhammed","islam","musluman",
-  "kuran","kur an","ayet","hadis","cami","ezan","imam"
+  "allah","tanri","peygamber","muhammed","4ll4h","4LLL4H12N1S1KEY1M",
+  "kuran","kur an","allanı","muhammedini","peygamberini",
 ].map(squash);
 
 // küfür/hakaret kelimeleri: SADECE dini içerikle beraber yakalamak için
@@ -645,3 +645,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
