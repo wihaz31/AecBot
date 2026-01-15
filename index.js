@@ -1,13 +1,7 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 
-// === CONSOLE KOMUTLARI ===
-process.stdin.setEncoding("utf8");
 
-process.stdin.on("data", async (data) => {
-  const cmd = data.trim().toLowerCase();
-
-  if (!cmd) return;
 
   console.log(`[CONSOLE CMD] ${cmd}`);
 
@@ -625,6 +619,14 @@ async function seedByDays(channel, days = 240, maxMessages = 40000) {
    DISCORD CLIENT
 ========================= */
 const client = new Client({
+  // === CONSOLE KOMUTLARI ===
+process.stdin.setEncoding("utf8");
+
+process.stdin.on("data", async (data) => {
+  const cmd = data.trim().toLowerCase();
+
+  if (!cmd) return;
+  }
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
@@ -759,4 +761,5 @@ if (message.mentions.has(client.user)) {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
