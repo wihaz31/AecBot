@@ -1,6 +1,86 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 
+// === CONSOLE KOMUTLARI ===
+process.stdin.setEncoding("utf8");
+
+process.stdin.on("data", async (data) => {
+  const cmd = data.trim().toLowerCase();
+
+  if (!cmd) return;
+
+  console.log(`[CONSOLE CMD] ${cmd}`);
+
+  // === REACTION ===
+  if (cmd === "reaction off") {
+    reactionsEnabled = false;
+    console.log("⛔ Reaction kapatıldı (console)");
+    return;
+  }
+
+  if (cmd === "reaction on") {
+    reactionsEnabled = true;
+    console.log("✅ Reaction açıldı (console)");
+    return;
+  }
+
+  // === SEED ===
+  if (cmd === "seed status") {
+    console.log(seedState);
+    return;
+  }
+
+  if (cmd === "seed start") {
+    if (seedState.running) {
+      console.log("Seed zaten çalışıyor.");
+      return;
+    }
+
+    try {
+      const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+      if (!ch || !ch.isTextBased()) {
+        console.log("Seed kanalı bulunamadı.");
+        return;
+      }
+
+      console.log("Seed başlatılıyor (console)...");
+      seedByDays(ch, SEED_DAYS, SEED_MAX);
+    } catch (e) {
+      console.error("Seed başlatma hatası:", e.message);
+    }
+    return;
+  }
+
+  // === BOT MESAJ ATTIR ===
+  if (cmd.startsWith("say ")) {
+    const text = data.trim().slice(4);
+    if (!text) {
+      console.log("say <mesaj>");
+      return;
+    }
+
+    try {
+      const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+      if (ch?.isTextBased()) {
+        await ch.send(text);
+        console.log("📨 Mesaj gönderildi.");
+      }
+    } catch (e) {
+      console.error("Mesaj gönderme hatası:", e.message);
+    }
+    return;
+  }
+
+  // === ÇIKIŞ ===
+  if (cmd === "exit") {
+    console.log("Bot kapatılıyor...");
+    process.exit(0);
+  }
+
+  console.log("Bilinmeyen komut.");
+});
+
+
 // === KOYEB FREE HACK: BOŞ HTTP SERVER ===
 const http = require("http");
 const PORT = process.env.PORT || 8000;
@@ -22,7 +102,7 @@ http
 const SEED_CHANNEL_ID = "705537838770421761";
 
 // === Seed parametreleri ===
-const SEED_DAYS = 180; // son 180 gün
+const SEED_DAYS = 240; // son 240 gün
 const SEED_MAX = 40000; // en fazla 40k mesaj çek
 
 // === Hafıza (canlı güncellenir) ===
@@ -36,7 +116,7 @@ let messageCounter = 0;
 let nextMessageTarget = Math.floor(Math.random() * 16) + 5; // 5–20
 
 // === Bot mesajına reply gelince cevap ihtimali ===
-const REPLY_RESPONSE_CHANCE = 0.75;
+const REPLY_RESPONSE_CHANCE = 1;
 
 // === Reaction ayarları ===
 let reactionsEnabled = false;
@@ -418,9 +498,9 @@ function markovSentence() {
 }
 
 /* =========================
-   SEED: SON 180 GÜN (MAX 40K) + PROGRESS + RATE LIMIT
+   SEED: SON 240 GÜN (MAX 40K) + PROGRESS + RATE LIMIT
 ========================= */
-async function seedByDays(channel, days = 180, maxMessages = 40000) {
+async function seedByDays(channel, days = 240, maxMessages = 40000) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
   const collected = [];
@@ -515,7 +595,7 @@ async function seedByDays(channel, days = 180, maxMessages = 40000) {
     else logProgress(false);
 
     if (reachedCutoff) {
-      console.log("Seed: cutoff tarihine ulaşıldı (180 gün sınırı).");
+      console.log("Seed: cutoff tarihine ulaşıldı (240 gün sınırı).");
       break;
     }
 
@@ -575,6 +655,11 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const content = (message.content || "").trim();
+    // === MENTION'a cevap ===
+if (message.mentions.has(client.user)) {
+  // İstersen admin komutları çalışsın diye return etmeden önce cevap yazıyoruz
+  await message.reply(markovSentence());
+  return;
 
     // === ADMIN KOMUTLARI ===
     if (message.author.id === ADMIN_USER_ID) {
@@ -674,3 +759,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
