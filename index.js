@@ -5,14 +5,81 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const http = require("http");
 const PORT = process.env.PORT || 8000;
 
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-  })
-  .listen(PORT, () => {
-    console.log(`HTTP server listening on ${PORT}`);
-  });
+const { URL } = require("url");
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
+
+function send(res, code, text) {
+  res.writeHead(code, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end(text);
+}
+
+http.createServer(async (req, res) => {
+  try {
+    const u = new URL(req.url, `http://${req.headers.host}`);
+
+    if (u.pathname === "/") {
+      return send(res, 200, "OK");
+    }
+
+    if (u.pathname !== "/cmd") {
+      return send(res, 404, "Not found");
+    }
+
+    const key = u.searchParams.get("key") || "";
+    if (!ADMIN_KEY || key !== ADMIN_KEY) {
+      return send(res, 401, "Unauthorized");
+    }
+
+    const action = (u.searchParams.get("action") || "").toLowerCase();
+
+    if (action === "reaction_off") {
+      reactionsEnabled = false;
+      return send(res, 200, "⛔ reaction off");
+    }
+
+    if (action === "reaction_on") {
+      reactionsEnabled = true;
+      return send(res, 200, "✅ reaction on");
+    }
+
+    if (action === "seed_status") {
+      return send(res, 200, JSON.stringify(seedState, null, 2));
+    }
+
+    if (action === "seed_start") {
+      if (seedState.running) return send(res, 200, "Seed already running");
+
+      const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+      if (!ch || !ch.isTextBased()) {
+        return send(res, 400, "Seed channel not found");
+      }
+
+      seedByDays(ch, SEED_DAYS, SEED_MAX);
+      return send(res, 200, "Seed started");
+    }
+
+    if (action === "say") {
+      const text = u.searchParams.get("text") || "";
+      if (!text) return send(res, 400, "Missing text");
+
+      const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+      if (!ch || !ch.isTextBased()) {
+        return send(res, 400, "Channel not found");
+      }
+
+      await ch.send(text);
+      return send(res, 200, "Sent");
+    }
+
+    return send(res, 400, "Unknown action");
+  } catch (e) {
+    console.error("HTTP cmd error:", e);
+    return send(res, 500, "Server error");
+  }
+}).listen(PORT, () => {
+  console.log(`HTTP server listening on ${PORT}`);
+});
+
 
 /* =========================
    AYARLAR
@@ -22,7 +89,7 @@ http
 const SEED_CHANNEL_ID = "705537838770421761";
 
 // === Seed parametreleri ===
-const SEED_DAYS = 180; // son 180 gün
+const SEED_DAYS = 240; // son 240 gün
 const SEED_MAX = 40000; // en fazla 40k mesaj çek
 
 // === Hafıza (canlı güncellenir) ===
@@ -418,9 +485,9 @@ function markovSentence() {
 }
 
 /* =========================
-   SEED: SON 180 GÜN (MAX 40K) + PROGRESS + RATE LIMIT
+   SEED: SON 240 GÜN (MAX 40K) + PROGRESS + RATE LIMIT
 ========================= */
-async function seedByDays(channel, days = 180, maxMessages = 40000) {
+async function seedByDays(channel, days = 240, maxMessages = 40000) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
   const collected = [];
@@ -515,7 +582,7 @@ async function seedByDays(channel, days = 180, maxMessages = 40000) {
     else logProgress(false);
 
     if (reachedCutoff) {
-      console.log("Seed: cutoff tarihine ulaşıldı (180 gün sınırı).");
+      console.log("Seed: cutoff tarihine ulaşıldı (240 gün sınırı).");
       break;
     }
 
@@ -753,3 +820,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
