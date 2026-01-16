@@ -5,9 +5,6 @@ const { Client, GatewayIntentBits } = require("discord.js");
    KOYEB FREE: BOŞ HTTP SERVER
 ========================= */
 const http = require("http");
-const PORT = process.env.PORT || 8000;
-
-const http = require("http");
 const { URL } = require("url");
 
 const PORT = process.env.PORT || 8000;
@@ -736,6 +733,7 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
 
 
 
