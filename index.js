@@ -7,10 +7,92 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const http = require("http");
 const PORT = process.env.PORT || 8000;
 
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
+const http = require("http");
+const { URL } = require("url");
+
+const PORT = process.env.PORT || 8000;
+
+// Koyeb'de Environment'a bunu ekle: CMD_KEY=....
+const CMD_KEY = process.env.CMD_KEY || ""; 
+
+http.createServer(async (req, res) => {
+  try {
+    const u = new URL(req.url, `http://${req.headers.host}`);
+    const path = u.pathname;
+
+    // healthcheck
+    if (path === "/") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      return res.end("OK");
+    }
+
+    // command endpoint
+    if (path === "/cmd") {
+      const key = u.searchParams.get("key") || "";
+      if (!CMD_KEY || key !== CMD_KEY) {
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        return res.end("unauthorized");
+      }
+
+      const action = (u.searchParams.get("action") || "").toLowerCase();
+
+      // reaction off/on
+      if (action === "reaction_off") {
+        reactionsEnabled = false;
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        return res.end("sent");
+      }
+      if (action === "reaction_on") {
+        reactionsEnabled = true;
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        return res.end("sent");
+      }
+
+      // say (seed kanalına yazar)
+      if (action === "say") {
+        const text = u.searchParams.get("text") || "";
+        if (!text.trim()) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          return res.end("missing text");
+        }
+
+        // client ready değilse gönderemez
+        if (!client?.isReady?.()) {
+          res.writeHead(503, { "Content-Type": "text/plain" });
+          return res.end("discord not ready");
+        }
+
+        const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+        if (!ch || !ch.isTextBased()) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          return res.end("channel not found");
+        }
+
+        await ch.send(text);
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        return res.end("sent");
+      }
+
+      // seed status
+      if (action === "seed_status") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(seedState, null, 2));
+      }
+
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      return res.end("unknown action");
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("server error");
+  }
+}).listen(PORT, () => {
+  console.log(`HTTP server listening on ${PORT}`);
+});
+
   })
   .listen(PORT, () => {
     console.log(`HTTP server listening on ${PORT}`);
@@ -654,6 +736,7 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
 
 
 
