@@ -90,11 +90,6 @@ http.createServer(async (req, res) => {
   console.log(`HTTP server listening on ${PORT}`);
 });
 
-  })
-  .listen(PORT, () => {
-    console.log(`HTTP server listening on ${PORT}`);
-  });
-
 /* =========================
    AYARLAR
 ========================= */
@@ -733,6 +728,7 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
 
 
 
