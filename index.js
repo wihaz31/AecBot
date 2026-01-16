@@ -28,7 +28,7 @@ const MAX_MEMORY_MESSAGES = 40000;
 const RECENT_EXCLUDE = 100;
 
 let messageCounter = 0;
-let nextMessageTarget = Math.floor(Math.random() * 16) + 5; // 5–20
+let nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 5–20
 
 const REPLY_RESPONSE_CHANCE = 1;
 const MENTION_RESPONSE_CHANCE = 1;
@@ -645,5 +645,6 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
