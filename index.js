@@ -624,7 +624,7 @@ client.on("messageCreate", async (message) => {
     messageCounter++;
     if (messageCounter >= nextMessageTarget) {
       messageCounter = 0;
-      nextMessageTarget = Math.floor(Math.random() * 16) + 5;
+      nextMessageTarget = Math.floor(Math.random() * 31) + 20;
       const out = generateSafeSentence();
       await message.channel.send(out);
     }
@@ -645,4 +645,5 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
