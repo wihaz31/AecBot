@@ -644,7 +644,18 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+console.log("Discord login başlıyor... token var mı?", Boolean(process.env.DISCORD_TOKEN));
+
+client.on("error", (e) => console.error("Discord client error:", e));
+client.on("shardError", (e) => console.error("Discord shard error:", e));
+process.on("unhandledRejection", (e) => console.error("UnhandledRejection:", e));
+process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
+
+client.login(process.env.DISCORD_TOKEN)
+  .then(() => console.log("Discord login OK (promise resolved)"))
+  .catch((e) => console.error("Discord login FAIL:", e));
+
+
 
 
 
