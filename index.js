@@ -303,6 +303,69 @@ function tokenize(text) {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, MAX_WORDS_PER_MESSAGE);
+   /* =========================
+   SMART REPLY (Sadece @mention için)
+   - Eski chatte benzer "soru"yu bulur
+   - Hemen ardından gelen mesajı "cevap" gibi döndürür
+========================= */
+
+// Basit Jaccard benzerliği
+function jaccard(aSet, bSet) {
+  if (!aSet.size || !bSet.size) return 0;
+  let inter = 0;
+  for (const w of aSet) if (bSet.has(w)) inter++;
+  const union = aSet.size + bSet.size - inter;
+  return union ? inter / union : 0;
+}
+
+function smartReplyFor(inputText) {
+  if (!memory || memory.length < 200) return null;
+
+  const inTok = tokenize(inputText);
+  if (inTok.length < 2) return null;
+  const inSet = new Set(inTok);
+
+  // yakın geçmişten cevap seçmemek için (kopya riskini azaltır)
+  const usableLen = Math.max(0, memory.length - RECENT_EXCLUDE);
+
+  // performans için rastgele örnekleme
+  const SAMPLE = Math.min(1500, usableLen - 1);
+  let bestIdx = -1;
+  let bestScore = 0;
+
+  for (let i = 0; i < SAMPLE; i++) {
+    const idx = Math.floor(Math.random() * (usableLen - 1)); // idx+1 var olsun
+    const q = memory[idx];
+    const a = memory[idx + 1];
+
+    if (!q || !a) continue;
+    if (containsReligiousAbuse(a)) continue; // cevapta din+kufur olmasın
+
+    const qTok = tokenize(q);
+    if (qTok.length < 2) continue;
+
+    const score = jaccard(inSet, new Set(qTok));
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = idx + 1; // cevabın index'i
+    }
+  }
+
+  // çok alakasızsa dönme
+  if (bestIdx === -1 || bestScore < 0.18) return null;
+
+  const candidate = memory[bestIdx];
+  if (!candidate) return null;
+
+  // kopya/benzerlik engeli (varsa)
+  if (tooSimilar(candidate)) return null;
+
+  if (containsReligiousAbuse(candidate)) return null;
+
+  return candidate;
+}
+
 }
 
 function buildMarkov3(messages) {
@@ -676,12 +739,14 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    // === @MENTION CEVAP ===
-    if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-      const out = generateSafeSentence();
-      await message.reply(out);
-      return;
-    }
+// === @MENTION CEVAP (SMART REPLY + fallback) ===
+if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
+  const smart = smartReplyFor(content);
+  const out = smart || generateSafeSentence(); // bulamazsa eski sistem
+  await message.reply(out);
+  return;
+}
+
 
     // === BOT MESAJINA REPLY ===
     if (
@@ -728,6 +793,7 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
 
 
 
