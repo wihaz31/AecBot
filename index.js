@@ -303,6 +303,7 @@ function tokenize(text) {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, MAX_WORDS_PER_MESSAGE);
+   }
    /* =========================
    SMART REPLY (Sadece @mention için)
    - Eski chatte benzer "soru"yu bulur
@@ -351,6 +352,7 @@ function smartReplyFor(inputText) {
       bestIdx = idx + 1; // cevabın index'i
     }
   }
+   
 
   // çok alakasızsa dönme
   if (bestIdx === -1 || bestScore < 0.18) return null;
@@ -366,7 +368,6 @@ function smartReplyFor(inputText) {
   return candidate;
 }
 
-}
 
 function buildMarkov3(messages) {
   const map = new Map();
@@ -793,6 +794,7 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
 
 
 
