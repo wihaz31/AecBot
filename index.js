@@ -198,7 +198,7 @@ function squash(s) {
 // dini kelimeler (istersen genişlet)
 const RELIGIOUS_TERMS = [
   "allah","tanri","peygamber","muhammed","4ll4h","4LLL4H12N1S1KEY1M",
-  "kuran","kur an","allanı","muhammedini","peygamberini",
+  "kuran","kur an","allanı","muhammedini","peygamberini","allahuınukşitabını","kitabını",
 ].map(squash);
 
 // küfür/hakaret kelimeleri: SADECE dini içerikle beraber yakalamak için
@@ -794,6 +794,7 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
 
 
 
