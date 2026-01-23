@@ -22,6 +22,8 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });
       return res.end("OK");
     }
+   // === ROBLOX AYARLARI ===
+  const ROBLOX_USER_ID = "2575829815"; // sadece sayı
 
     // command endpoint
     if (path === "/cmd") {
@@ -30,6 +32,34 @@ http.createServer(async (req, res) => {
         res.writeHead(401, { "Content-Type": "text/plain" });
         return res.end("unauthorized");
       }
+     async function fetchRobloxStatus() {
+  try {
+    const res = await fetch("https://presence.roblox.com/v1/presence/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userIds: [Number(ROBLOX_USER_ID)],
+      }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const p = data.userPresences?.[0];
+    if (!p) return null;
+
+    return {
+      isOnline: p.userPresenceType !== 0,
+      presenceType: p.userPresenceType, // 0=offline, 1=online, 2=in game, 3=in studio
+      gameId: p.gameId || null,
+      placeId: p.placeId || null,
+      lastLocation: p.lastLocation || null,
+    };
+  } catch (e) {
+    console.error("Roblox status error:", e);
+    return null;
+  }
+}
 
       const action = (u.searchParams.get("action") || "").toLowerCase();
 
@@ -696,6 +726,35 @@ client.on("messageCreate", async (message) => {
           await message.reply("Seed daha başlamadı.");
           return;
         }
+// === *gökhan (Roblox status) ===
+if (content.toLowerCase() === "*gökhan") {
+  const status = await fetchRobloxStatus();
+
+  if (!status) {
+    await message.reply("NT olduk.");
+    return;
+  }
+
+  if (!status.isOnline) {
+    await message.reply("offline.");
+    return;
+  }
+
+  if (status.presenceType === 2) {
+    await message.reply(
+      `Gökhan yine Robloxta aq.\nOyun: ${status.lastLocation || "Bilinmiyor"}`
+    );
+    return;
+  }
+
+  if (status.presenceType === 3) {
+    await message.reply("Gökhan nabıyon aq.");
+    return;
+  }
+
+  await message.reply("online sadece.");
+  return;
+}
 
         const now = Date.now();
         const elapsed = now - seedState.startedAt;
