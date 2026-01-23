@@ -143,6 +143,50 @@ function containsReligiousAbuse(text) {
 
   return true;
 }
+async function fetchRobloxPlaceName(placeId) {
+  if (!placeId) return null;
+
+  try {
+    const r = await fetch(`https://games.roblox.com/v1/games?placeIds=${placeId}`);
+    if (!r.ok) return null;
+
+    const data = await r.json();
+    const g = data?.data?.[0];
+    return g?.name || null;
+  } catch (e) {
+    console.error("Roblox place name error:", e);
+    return null;
+  }
+}
+async function fetchRobloxStatus() {
+  try {
+    const res = await fetch("https://presence.roblox.com/v1/presence/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const p = data.userPresences?.[0];
+    if (!p) return null;
+
+    const placeName = await fetchRobloxPlaceName(p.placeId);
+
+    return {
+      isOnline: p.userPresenceType !== 0,
+      presenceType: p.userPresenceType, // 0=offline, 1=online, 2=in game, 3=in studio
+      gameId: p.gameId || null,
+      placeId: p.placeId || null,
+      lastLocation: p.lastLocation || null,
+      placeName: placeName || null,
+    };
+  } catch (e) {
+    console.error("Roblox status error:", e);
+    return null;
+  }
+}
 
 /* =========================
    YARDIMCILAR
@@ -866,3 +910,4 @@ client
   .login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+
