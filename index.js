@@ -36,7 +36,7 @@ const PORT = process.env.PORT || 8000;
 const CMD_KEY = process.env.CMD_KEY || "";
 
 // Roblox
-const ROBLOX_USER_ID = "2575829815"; // sadece sayı (string yazabilirsin)
+const ROBLOX_USER_ID = "2575829815"; // sayı string de olur
 
 /* =========================
    SEED DURUMU
@@ -97,7 +97,6 @@ const WORD_POOL = [
 
 /* =========================
    SADECE "DİN + KÜFÜR" ENGELİ
-   Normal küfür serbest.
 ========================= */
 function foldTR(s) {
   return (s || "")
@@ -134,53 +133,70 @@ const SWEAR_TERMS = [
 function containsReligiousAbuse(text) {
   const t = squash(text);
   if (!t) return false;
-
   const hasRel = RELIGIOUS_TERMS.some((r) => t.includes(r));
   if (!hasRel) return false;
-
   const hasSwear = SWEAR_TERMS.some((w) => t.includes(w));
   if (!hasSwear) return false;
-
   return true;
 }
+
+/* =========================
+   ROBLOX (tek sistem + cache)
+========================= */
+const placeNameCache = new Map(); // placeId -> { name, exp }
+const PLACE_CACHE_MS = 10 * 60 * 1000;
+
 async function fetchRobloxPlaceName(placeId) {
   if (!placeId) return null;
 
+  const key = String(placeId);
+  const cached = placeNameCache.get(key);
+  if (cached && cached.exp > Date.now()) return cached.name;
+
   try {
-    const r = await fetch(`https://games.roblox.com/v1/games?placeIds=${placeId}`);
+    // placeId -> oyun adı
+    const r = await fetch(
+      `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`
+    );
     if (!r.ok) return null;
 
-    const data = await r.json();
-    const g = data?.data?.[0];
-    return g?.name || null;
+    const arr = await r.json();
+    const name = arr?.[0]?.name || null;
+
+    placeNameCache.set(key, { name, exp: Date.now() + PLACE_CACHE_MS });
+    return name;
   } catch (e) {
     console.error("Roblox place name error:", e);
     return null;
   }
 }
+
 async function fetchRobloxStatus() {
   try {
-    const res = await fetch("https://presence.roblox.com/v1/presence/users", {
+    const r = await fetch("https://presence.roblox.com/v1/presence/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
     });
 
-    if (!res.ok) return null;
+    if (!r.ok) return null;
 
-    const data = await res.json();
-    const p = data.userPresences?.[0];
+    const data = await r.json();
+    const p = data?.userPresences?.[0];
     if (!p) return null;
 
-    const placeName = await fetchRobloxPlaceName(p.placeId);
+    const presenceType = p.userPresenceType; // 0=offline,1=online,2=in game,3=in studio
+    const placeId = p.placeId || null;
+    const lastLocation = p.lastLocation || null;
+
+    const placeName = placeId ? await fetchRobloxPlaceName(placeId) : null;
 
     return {
-      isOnline: p.userPresenceType !== 0,
-      presenceType: p.userPresenceType, // 0=offline, 1=online, 2=in game, 3=in studio
-      gameId: p.gameId || null,
-      placeId: p.placeId || null,
-      lastLocation: p.lastLocation || null,
-      placeName: placeName || null,
+      presenceType,
+      placeId,
+      lastLocation,
+      placeName,
+      raw: p, // debug için
     };
   } catch (e) {
     console.error("Roblox status error:", e);
@@ -272,8 +288,6 @@ function tokenize(text) {
 
 /* =========================
    SMART REPLY (Sadece @mention için)
-   - Eski chatte benzer "soru"yu bulur
-   - Hemen ardından gelen mesajı "cevap" gibi döndürür
 ========================= */
 function jaccard(aSet, bSet) {
   if (!aSet.size || !bSet.size) return 0;
@@ -298,10 +312,9 @@ function smartReplyFor(inputText) {
   let bestScore = 0;
 
   for (let i = 0; i < SAMPLE; i++) {
-    const idx = Math.floor(Math.random() * (usableLen - 1)); // idx+1 olsun
+    const idx = Math.floor(Math.random() * (usableLen - 1));
     const q = memory[idx];
     const a = memory[idx + 1];
-
     if (!q || !a) continue;
     if (containsReligiousAbuse(a)) continue;
 
@@ -319,7 +332,6 @@ function smartReplyFor(inputText) {
 
   const candidate = memory[bestIdx];
   if (!candidate) return null;
-
   if (tooSimilar(candidate)) return null;
   if (containsReligiousAbuse(candidate)) return null;
 
@@ -343,12 +355,8 @@ function buildMarkov3(messages) {
   return map;
 }
 
-/* =========================
-   CHAT'TEN KELİME + NOISE
-========================= */
 function randomChatWord() {
   if (memory.length === 0) return null;
-
   for (let i = 0; i < 12; i++) {
     const msg = randomFrom(memory);
     const words = tokenize(msg);
@@ -400,9 +408,6 @@ function injectNoiseFromChat(words) {
   return words;
 }
 
-/* =========================
-   ÜRETİM (Markov + anti-copy) + DİN+KÜFÜR ENGELİ
-========================= */
 function markovSentenceRaw() {
   if (memory.length < 60) {
     const fb = randomSentence();
@@ -436,12 +441,6 @@ function markovSentenceRaw() {
 
     out = injectNoiseFromChat(out);
 
-    if (Math.random() < 0.15 && out.length >= 6) {
-      const i = Math.floor(Math.random() * out.length);
-      const j = Math.floor(Math.random() * out.length);
-      [out[i], out[j]] = [out[j], out[i]];
-    }
-
     let s = out.join(" ");
     s = s.charAt(0).toUpperCase() + s.slice(1);
     s += Math.random() < 0.2 ? "..." : ".";
@@ -466,56 +465,6 @@ function generateSafeSentence() {
   }
   const fb = randomSentence();
   return containsReligiousAbuse(fb) ? "..." : fb;
-}
-
-/* =========================
-   ROBLOX STATUS
-========================= */
-async function fetchPlaceName(placeId) {
-  try {
-    const r = await fetch(
-      `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`
-    );
-    if (!r.ok) return null;
-    const arr = await r.json();
-    return arr?.[0]?.name || null;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchRobloxStatus() {
-  try {
-    const r = await fetch("https://presence.roblox.com/v1/presence/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
-    });
-
-    if (!r.ok) return null;
-
-    const data = await r.json();
-    const p = data.userPresences?.[0];
-    if (!p) return null;
-
-    const presenceType = p.userPresenceType; // 0=offline,1=online,2=in game,3=in studio
-    const lastLocation = p.lastLocation || null;
-    const placeId = p.placeId || null;
-
-    let placeName = lastLocation;
-    if ((!placeName || placeName === "Bilinmiyor") && placeId) {
-      placeName = await fetchPlaceName(placeId);
-    }
-
-    return {
-      presenceType,
-      lastLocation: placeName || lastLocation,
-      placeId,
-    };
-  } catch (e) {
-    console.error("Roblox status error:", e);
-    return null;
-  }
 }
 
 /* =========================
@@ -745,9 +694,7 @@ http
       res.end("server error");
     }
   })
-  .listen(PORT, () => {
-    console.log(`HTTP server listening on ${PORT}`);
-  });
+  .listen(PORT, () => console.log(`HTTP server listening on ${PORT}`));
 
 /* =========================
    MESSAGE HANDLER
@@ -767,20 +714,27 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
+      // İstersen bunu yorum satırı yap: Bilinmiyor geliyorsa p raw’da ne var görürsün.
+      console.log("ROBLOX RAW:", status.raw);
+
       if (status.presenceType === 0) {
         await message.reply("offline.");
         return;
       }
 
-      if (status.presenceType === 2) {
-        await message.reply(
-          `Gökhan yine Robloxta aq.\nOyun: ${status.lastLocation || "Ne Bilim Aq"}`
-        );
+      if (status.presenceType === 3) {
+        await message.reply("Gökhan Studio'da nabıyon aq.");
         return;
       }
 
-      if (status.presenceType === 3) {
-        await message.reply("Gökhan nabıyon aq.");
+      if (status.presenceType === 2) {
+        const gameText =
+          status.placeName ||
+          status.lastLocation ||
+          (status.placeId ? `placeId=${status.placeId}` : null) ||
+          "Bilinmiyor";
+
+        await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${gameText}`);
         return;
       }
 
@@ -815,7 +769,7 @@ client.on("messageCreate", async (message) => {
 
         const now = Date.now();
         const elapsed = now - seedState.startedAt;
-        const status =
+        const st =
           seedState.running ? "⏳ ÇALIŞIYOR"
           : seedState.done ? "✅ TAMAMLANDI"
           : seedState.error ? "❌ HATA"
@@ -825,15 +779,13 @@ client.on("messageCreate", async (message) => {
 
         await message.reply(
           [
-            `Seed durumu: ${status}`,
+            `Seed durumu: ${st}`,
             `Kanal: #${seedState.channelName ?? "?"}`,
             `Toplandı: ${seedState.collected}/${seedState.max}`,
             `Fetch: ${seedState.fetchCount}`,
             `Süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
             seedState.error ? `Hata: ${seedState.error}` : null,
-          ]
-            .filter(Boolean)
-            .join("\n")
+          ].filter(Boolean).join("\n")
         );
         return;
       }
@@ -877,7 +829,7 @@ client.on("messageCreate", async (message) => {
     messageCounter++;
     if (messageCounter >= nextMessageTarget) {
       messageCounter = 0;
-      nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 20–50
+      nextMessageTarget = Math.floor(Math.random() * 31) + 20;
       const out = generateSafeSentence();
       await message.channel.send(out);
     }
@@ -910,4 +862,3 @@ client
   .login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
-
