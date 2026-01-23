@@ -1,4 +1,8 @@
 require("dotenv").config();
+
+const dns = require("dns");
+dns.setDefaultResultOrder("ipv4first"); // Discord WS için sık fix
+
 const { Client, GatewayIntentBits } = require("discord.js");
 
 /* =========================
@@ -854,6 +858,10 @@ process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
+client.on("error", (e) => console.error("Discord client error:", e));
+client.on("shardError", (e) => console.error("Discord shard error:", e));
+
+
 
 
 
