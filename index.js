@@ -3,126 +3,9 @@ require("dotenv").config();
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first"); // Discord WS için sık fix
 
-const { Client, GatewayIntentBits } = require("discord.js");
-
-/* =========================
-   KOYEB FREE: BOŞ HTTP SERVER
-========================= */
 const http = require("http");
 const { URL } = require("url");
-
-const PORT = process.env.PORT || 8000;
-
-// Koyeb'de Environment'a bunu ekle: CMD_KEY=....
-const CMD_KEY = process.env.CMD_KEY || ""; 
-
-http.createServer(async (req, res) => {
-  try {
-    const u = new URL(req.url, `http://${req.headers.host}`);
-    const path = u.pathname;
-
-    // healthcheck
-    if (path === "/") {
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      return res.end("OK");
-    }
-   // === ROBLOX AYARLARI ===
-  const ROBLOX_USER_ID = "2575829815"; // sadece sayı
-
-    // command endpoint
-    if (path === "/cmd") {
-      const key = u.searchParams.get("key") || "";
-      if (!CMD_KEY || key !== CMD_KEY) {
-        res.writeHead(401, { "Content-Type": "text/plain" });
-        return res.end("unauthorized");
-      }
-     async function fetchRobloxStatus() {
-  try {
-    const res = await fetch("https://presence.roblox.com/v1/presence/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userIds: [Number(ROBLOX_USER_ID)],
-      }),
-    });
-
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const p = data.userPresences?.[0];
-    if (!p) return null;
-
-    return {
-      isOnline: p.userPresenceType !== 0,
-      presenceType: p.userPresenceType, // 0=offline, 1=online, 2=in game, 3=in studio
-      gameId: p.gameId || null,
-      placeId: p.placeId || null,
-      lastLocation: p.lastLocation || null,
-    };
-  } catch (e) {
-    console.error("Roblox status error:", e);
-    return null;
-  }
-}
-
-      const action = (u.searchParams.get("action") || "").toLowerCase();
-
-      // reaction off/on
-      if (action === "reaction_off") {
-        reactionsEnabled = false;
-        res.writeHead(200, { "Content-Type": "text/plain" });
-        return res.end("sent");
-      }
-      if (action === "reaction_on") {
-        reactionsEnabled = true;
-        res.writeHead(200, { "Content-Type": "text/plain" });
-        return res.end("sent");
-      }
-
-      // say (seed kanalına yazar)
-      if (action === "say") {
-        const text = u.searchParams.get("text") || "";
-        if (!text.trim()) {
-          res.writeHead(400, { "Content-Type": "text/plain" });
-          return res.end("missing text");
-        }
-
-        // client ready değilse gönderemez
-        if (!client?.isReady?.()) {
-          res.writeHead(503, { "Content-Type": "text/plain" });
-          return res.end("discord not ready");
-        }
-
-        const ch = await client.channels.fetch(SEED_CHANNEL_ID);
-        if (!ch || !ch.isTextBased()) {
-          res.writeHead(404, { "Content-Type": "text/plain" });
-          return res.end("channel not found");
-        }
-
-        await ch.send(text);
-        res.writeHead(200, { "Content-Type": "text/plain" });
-        return res.end("sent");
-      }
-
-      // seed status
-      if (action === "seed_status") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify(seedState, null, 2));
-      }
-
-      res.writeHead(400, { "Content-Type": "text/plain" });
-      return res.end("unknown action");
-    }
-
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found");
-  } catch (e) {
-    res.writeHead(500, { "Content-Type": "text/plain" });
-    res.end("server error");
-  }
-}).listen(PORT, () => {
-  console.log(`HTTP server listening on ${PORT}`);
-});
+const { Client, GatewayIntentBits } = require("discord.js");
 
 /* =========================
    AYARLAR
@@ -136,7 +19,7 @@ const MAX_MEMORY_MESSAGES = 40000;
 const RECENT_EXCLUDE = 100;
 
 let messageCounter = 0;
-let nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 5–20
+let nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 20–50
 
 const REPLY_RESPONSE_CHANCE = 1;
 const MENTION_RESPONSE_CHANCE = 1;
@@ -147,6 +30,13 @@ const ADMIN_USER_ID = "297433660553035778";
 const TARGET_USER_ID = "403940186494599168";
 const EMOJI_1 = "🪑";
 const EMOJI_2 = "🪢";
+
+// Koyeb Port + CMD Key
+const PORT = process.env.PORT || 8000;
+const CMD_KEY = process.env.CMD_KEY || "";
+
+// Roblox ayarları
+const ROBLOX_USER_ID = "2575829815"; // sadece sayı
 
 /* =========================
    SEED DURUMU
@@ -229,15 +119,12 @@ function squash(s) {
     .trim();
 }
 
-// dini kelimeler (istersen genişlet)
 const RELIGIOUS_TERMS = [
   "allah","tanri","peygamber","muhammed","4ll4h","4LLL4H12N1S1KEY1M",
   "kuran","allanı","muhammedini","peygamberini",
   "allahuınukşitabını","kitabını",
 ].map(squash);
 
-// küfür/hakaret kelimeleri: SADECE dini içerikle beraber yakalamak için
-// (normal küfürlü cümleler engellenmeyecek)
 const SWEAR_TERMS = [
   "amk","aq","amq","o c","oc","sik","s1k","s*k","sikeyim","siktir",
   "orospu","pic","piç","anan","bacini","got","g0t","yarrak","yarak",
@@ -254,7 +141,6 @@ function containsReligiousAbuse(text) {
   const hasSwear = SWEAR_TERMS.some((w) => t.includes(w));
   if (!hasSwear) return false;
 
-  // sadece ikisi bir aradaysa TRUE
   return true;
 }
 
@@ -338,14 +224,13 @@ function tokenize(text) {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, MAX_WORDS_PER_MESSAGE);
-   }
-   /* =========================
+}
+
+/* =========================
    SMART REPLY (Sadece @mention için)
    - Eski chatte benzer "soru"yu bulur
    - Hemen ardından gelen mesajı "cevap" gibi döndürür
 ========================= */
-
-// Basit Jaccard benzerliği
 function jaccard(aSet, bSet) {
   if (!aSet.size || !bSet.size) return 0;
   let inter = 0;
@@ -361,10 +246,9 @@ function smartReplyFor(inputText) {
   if (inTok.length < 2) return null;
   const inSet = new Set(inTok);
 
-  // yakın geçmişten cevap seçmemek için (kopya riskini azaltır)
   const usableLen = Math.max(0, memory.length - RECENT_EXCLUDE);
+  if (usableLen < 2) return null;
 
-  // performans için rastgele örnekleme
   const SAMPLE = Math.min(1500, usableLen - 1);
   let bestIdx = -1;
   let bestScore = 0;
@@ -373,37 +257,34 @@ function smartReplyFor(inputText) {
     const idx = Math.floor(Math.random() * (usableLen - 1)); // idx+1 var olsun
     const q = memory[idx];
     const a = memory[idx + 1];
-
     if (!q || !a) continue;
-    if (containsReligiousAbuse(a)) continue; // cevapta din+kufur olmasın
+
+    if (containsReligiousAbuse(a)) continue;
 
     const qTok = tokenize(q);
     if (qTok.length < 2) continue;
 
     const score = jaccard(inSet, new Set(qTok));
-
     if (score > bestScore) {
       bestScore = score;
-      bestIdx = idx + 1; // cevabın index'i
+      bestIdx = idx + 1;
     }
   }
-   
 
-  // çok alakasızsa dönme
   if (bestIdx === -1 || bestScore < 0.18) return null;
 
   const candidate = memory[bestIdx];
   if (!candidate) return null;
 
-  // kopya/benzerlik engeli (varsa)
   if (tooSimilar(candidate)) return null;
-
   if (containsReligiousAbuse(candidate)) return null;
 
   return candidate;
 }
 
-
+/* =========================
+   MARKOV
+========================= */
 function buildMarkov3(messages) {
   const map = new Map();
   for (const msg of messages) {
@@ -536,12 +417,41 @@ function generateSafeSentence() {
   for (let tries = 0; tries < 80; tries++) {
     const s = markovSentenceRaw();
     if (!s) continue;
-    if (containsReligiousAbuse(s)) continue; // SADECE din+küfür engeli
+    if (containsReligiousAbuse(s)) continue;
     return s;
   }
-  // fallback
   const fb = randomSentence();
   return containsReligiousAbuse(fb) ? "..." : fb;
+}
+
+/* =========================
+   ROBLOX PRESENCE
+========================= */
+async function fetchRobloxStatus() {
+  try {
+    const fetchFn = globalThis.fetch;
+    if (!fetchFn) throw new Error("fetch not available");
+
+    const r = await fetchFn("https://presence.roblox.com/v1/presence/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
+    });
+
+    if (!r.ok) return null;
+
+    const data = await r.json();
+    const p = data.userPresences?.[0];
+    if (!p) return null;
+
+    return {
+      presenceType: p.userPresenceType, // 0=offline,1=online,2=in game,3=in studio
+      lastLocation: p.lastLocation || null,
+    };
+  } catch (e) {
+    console.error("Roblox status error:", e);
+    return null;
+  }
 }
 
 /* =========================
@@ -631,7 +541,6 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       const t = (m.content || "").trim();
       if (!t) continue;
 
-      // ✅ SADECE din + küfür içeren mesajları seed'den dışarıda bırak (opsiyon)
       if (containsReligiousAbuse(t)) continue;
 
       collected.push(t);
@@ -649,13 +558,11 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
     beforeId = msgs.last().id;
   }
 
-  // memory doldur
   memory.length = 0;
   memory.push(...collected);
 
   while (memory.length > MAX_MEMORY_MESSAGES) memory.shift();
 
-  // memorySet doldur
   memorySet.clear();
   for (const t of memory) memorySet.add(normalizeText(t));
 
@@ -679,6 +586,90 @@ const client = new Client({
   ],
 });
 
+/* =========================
+   KOYEB FREE: HTTP SERVER
+========================= */
+http
+  .createServer(async (req, res) => {
+    try {
+      const u = new URL(req.url, `http://${req.headers.host}`);
+      const path = u.pathname;
+
+      // healthcheck
+      if (path === "/") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        return res.end("OK");
+      }
+
+      // command endpoint
+      if (path === "/cmd") {
+        const key = u.searchParams.get("key") || "";
+        if (!CMD_KEY || key !== CMD_KEY) {
+          res.writeHead(401, { "Content-Type": "text/plain" });
+          return res.end("unauthorized");
+        }
+
+        const action = (u.searchParams.get("action") || "").toLowerCase();
+
+        if (action === "reaction_off") {
+          reactionsEnabled = false;
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          return res.end("sent");
+        }
+
+        if (action === "reaction_on") {
+          reactionsEnabled = true;
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          return res.end("sent");
+        }
+
+        // say (seed kanalına yazar)
+        if (action === "say") {
+          const text = u.searchParams.get("text") || "";
+          if (!text.trim()) {
+            res.writeHead(400, { "Content-Type": "text/plain" });
+            return res.end("missing text");
+          }
+
+          if (!client?.isReady?.()) {
+            res.writeHead(503, { "Content-Type": "text/plain" });
+            return res.end("discord not ready");
+          }
+
+          const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+          if (!ch || !ch.isTextBased()) {
+            res.writeHead(404, { "Content-Type": "text/plain" });
+            return res.end("channel not found");
+          }
+
+          await ch.send(text);
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          return res.end("sent");
+        }
+
+        if (action === "seed_status") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify(seedState, null, 2));
+        }
+
+        res.writeHead(400, { "Content-Type": "text/plain" });
+        return res.end("unknown action");
+      }
+
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("not found");
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end("server error");
+    }
+  })
+  .listen(PORT, () => {
+    console.log(`HTTP server listening on ${PORT}`);
+  });
+
+/* =========================
+   DISCORD EVENTS
+========================= */
 client.once("ready", async () => {
   console.log(`Bot aktif: ${client.user.tag}`);
 
@@ -706,6 +697,34 @@ client.on("messageCreate", async (message) => {
 
     const content = (message.content || "").trim();
 
+    // === *gökhan (Roblox status) ===
+    if (content.toLowerCase() === "*gökhan") {
+      const status = await fetchRobloxStatus();
+
+      if (!status) {
+        await message.reply("Roblox API patladı gibi, yine dene.");
+        return;
+      }
+
+      if (status.presenceType === 0) {
+        await message.reply("Offline.");
+        return;
+      }
+
+      if (status.presenceType === 2) {
+        await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${status.lastLocation || "Bilinmiyor"}`);
+        return;
+      }
+
+      if (status.presenceType === 3) {
+        await message.reply("Gökhan studio’da takılıyor.");
+        return;
+      }
+
+      await message.reply("Online ama oyunda değil.");
+      return;
+    }
+
     // === ADMIN KOMUTLARI ===
     if (message.author.id === ADMIN_USER_ID) {
       const cmd = content.toLowerCase();
@@ -730,35 +749,6 @@ client.on("messageCreate", async (message) => {
           await message.reply("Seed daha başlamadı.");
           return;
         }
-// === *gökhan (Roblox status) ===
-if (content.toLowerCase() === "*gökhan") {
-  const status = await fetchRobloxStatus();
-
-  if (!status) {
-    await message.reply("NT olduk.");
-    return;
-  }
-
-  if (!status.isOnline) {
-    await message.reply("offline.");
-    return;
-  }
-
-  if (status.presenceType === 2) {
-    await message.reply(
-      `Gökhan yine Robloxta aq.\nOyun: ${status.lastLocation || "Bilinmiyor"}`
-    );
-    return;
-  }
-
-  if (status.presenceType === 3) {
-    await message.reply("Gökhan nabıyon aq.");
-    return;
-  }
-
-  await message.reply("online sadece.");
-  return;
-}
 
         const now = Date.now();
         const elapsed = now - seedState.startedAt;
@@ -790,10 +780,8 @@ if (content.toLowerCase() === "*gökhan") {
 
     // === HAFIZA CANLI GÜNCELLEME (SADECE SEED KANALI) ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
-      // ✅ sadece din+küfür içerenleri hafızaya alma (opsiyon)
       if (!containsReligiousAbuse(content)) {
         const norm = normalizeText(content);
-
         memory.push(content);
         memorySet.add(norm);
 
@@ -804,14 +792,13 @@ if (content.toLowerCase() === "*gökhan") {
       }
     }
 
-// === @MENTION CEVAP (SMART REPLY + fallback) ===
-if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-  const smart = smartReplyFor(content);
-  const out = smart || generateSafeSentence(); // bulamazsa eski sistem
-  await message.reply(out);
-  return;
-}
-
+    // === @MENTION CEVAP (SMART REPLY + fallback) ===
+    if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
+      const smart = smartReplyFor(content);
+      const out = smart || generateSafeSentence();
+      await message.reply(out);
+      return;
+    }
 
     // === BOT MESAJINA REPLY ===
     if (
@@ -824,11 +811,11 @@ if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE
       return;
     }
 
-    // === 5–20 ARASI RASTGELE ARALIKLA MESAJ AT ===
+    // === RASTGELE ARALIKLA MESAJ AT ===
     messageCounter++;
     if (messageCounter >= nextMessageTarget) {
       messageCounter = 0;
-      nextMessageTarget = Math.floor(Math.random() * 31) + 20;
+      nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 20–50
       const out = generateSafeSentence();
       await message.channel.send(out);
     }
@@ -842,12 +829,14 @@ if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE
 
     if (!has1) await message.react(EMOJI_1);
     if (!has2) await message.react(EMOJI_2);
-
   } catch (e) {
     console.error(e);
   }
 });
 
+/* =========================
+   LOGIN + ERROR LOGS
+========================= */
 console.log("Discord login başlıyor... token var mı?", Boolean(process.env.DISCORD_TOKEN));
 
 client.on("error", (e) => console.error("Discord client error:", e));
@@ -855,22 +844,7 @@ client.on("shardError", (e) => console.error("Discord shard error:", e));
 process.on("unhandledRejection", (e) => console.error("UnhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
 
-client.login(process.env.DISCORD_TOKEN)
+client
+  .login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK (promise resolved)"))
   .catch((e) => console.error("Discord login FAIL:", e));
-client.on("error", (e) => console.error("Discord client error:", e));
-client.on("shardError", (e) => console.error("Discord shard error:", e));
-
-
-
-
-
-
-
-
-
-
-
-
-
-
