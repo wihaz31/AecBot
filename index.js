@@ -31,12 +31,12 @@ const TARGET_USER_ID = "403940186494599168";
 const EMOJI_1 = "🪑";
 const EMOJI_2 = "🪢";
 
-// Koyeb Port + CMD Key
+// HTTP / CMD
 const PORT = process.env.PORT || 8000;
 const CMD_KEY = process.env.CMD_KEY || "";
 
-// Roblox ayarları
-const ROBLOX_USER_ID = "2575829815"; // sadece sayı
+// Roblox
+const ROBLOX_USER_ID = "2575829815"; // sadece sayı (string yazabilirsin)
 
 /* =========================
    SEED DURUMU
@@ -121,8 +121,8 @@ function squash(s) {
 
 const RELIGIOUS_TERMS = [
   "allah","tanri","peygamber","muhammed","4ll4h","4LLL4H12N1S1KEY1M",
-  "kuran","allanı","muhammedini","peygamberini",
-  "allahuınukşitabını","kitabını",
+  "kuran","kur an","allanı","muhammedini","peygamberini",
+  "kitabını","kitabini","allahuınukşitabını","allahuinukşitabini",
 ].map(squash);
 
 const SWEAR_TERMS = [
@@ -247,18 +247,18 @@ function smartReplyFor(inputText) {
   const inSet = new Set(inTok);
 
   const usableLen = Math.max(0, memory.length - RECENT_EXCLUDE);
-  if (usableLen < 2) return null;
+  if (usableLen < 5) return null;
 
   const SAMPLE = Math.min(1500, usableLen - 1);
   let bestIdx = -1;
   let bestScore = 0;
 
   for (let i = 0; i < SAMPLE; i++) {
-    const idx = Math.floor(Math.random() * (usableLen - 1)); // idx+1 var olsun
+    const idx = Math.floor(Math.random() * (usableLen - 1)); // idx+1 olsun
     const q = memory[idx];
     const a = memory[idx + 1];
-    if (!q || !a) continue;
 
+    if (!q || !a) continue;
     if (containsReligiousAbuse(a)) continue;
 
     const qTok = tokenize(q);
@@ -283,7 +283,7 @@ function smartReplyFor(inputText) {
 }
 
 /* =========================
-   MARKOV
+   MARKOV MODEL
 ========================= */
 function buildMarkov3(messages) {
   const map = new Map();
@@ -425,14 +425,24 @@ function generateSafeSentence() {
 }
 
 /* =========================
-   ROBLOX PRESENCE
+   ROBLOX STATUS
 ========================= */
+async function fetchPlaceName(placeId) {
+  try {
+    const r = await fetch(
+      `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`
+    );
+    if (!r.ok) return null;
+    const arr = await r.json();
+    return arr?.[0]?.name || null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchRobloxStatus() {
   try {
-    const fetchFn = globalThis.fetch;
-    if (!fetchFn) throw new Error("fetch not available");
-
-    const r = await fetchFn("https://presence.roblox.com/v1/presence/users", {
+    const r = await fetch("https://presence.roblox.com/v1/presence/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
@@ -444,9 +454,19 @@ async function fetchRobloxStatus() {
     const p = data.userPresences?.[0];
     if (!p) return null;
 
+    const presenceType = p.userPresenceType; // 0=offline,1=online,2=in game,3=in studio
+    const lastLocation = p.lastLocation || null;
+    const placeId = p.placeId || null;
+
+    let placeName = lastLocation;
+    if ((!placeName || placeName === "Bilinmiyor") && placeId) {
+      placeName = await fetchPlaceName(placeId);
+    }
+
     return {
-      presenceType: p.userPresenceType, // 0=offline,1=online,2=in game,3=in studio
-      lastLocation: p.lastLocation || null,
+      presenceType,
+      lastLocation: placeName || lastLocation,
+      placeId,
     };
   } catch (e) {
     console.error("Roblox status error:", e);
@@ -586,8 +606,29 @@ const client = new Client({
   ],
 });
 
+client.once("ready", async () => {
+  console.log(`Bot aktif: ${client.user.tag}`);
+
+  try {
+    const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+    if (!ch) {
+      console.log("Seed: Kanal bulunamadı (ID yanlış olabilir).");
+      return;
+    }
+    if (!ch.isTextBased()) {
+      console.log("Seed: Kanal text değil.");
+      return;
+    }
+
+    console.log(`Seed: Kanal bulundu -> #${ch.name}`);
+    await seedByDays(ch, SEED_DAYS, SEED_MAX);
+  } catch (e) {
+    console.error("Seed error:", e);
+  }
+});
+
 /* =========================
-   KOYEB FREE: HTTP SERVER
+   HTTP SERVER (Koyeb healthcheck + cmd)
 ========================= */
 http
   .createServer(async (req, res) => {
@@ -595,13 +636,11 @@ http
       const u = new URL(req.url, `http://${req.headers.host}`);
       const path = u.pathname;
 
-      // healthcheck
       if (path === "/") {
         res.writeHead(200, { "Content-Type": "text/plain" });
         return res.end("OK");
       }
 
-      // command endpoint
       if (path === "/cmd") {
         const key = u.searchParams.get("key") || "";
         if (!CMD_KEY || key !== CMD_KEY) {
@@ -623,7 +662,6 @@ http
           return res.end("sent");
         }
 
-        // say (seed kanalına yazar)
         if (action === "say") {
           const text = u.searchParams.get("text") || "";
           if (!text.trim()) {
@@ -668,29 +706,8 @@ http
   });
 
 /* =========================
-   DISCORD EVENTS
+   MESSAGE HANDLER
 ========================= */
-client.once("ready", async () => {
-  console.log(`Bot aktif: ${client.user.tag}`);
-
-  try {
-    const ch = await client.channels.fetch(SEED_CHANNEL_ID);
-    if (!ch) {
-      console.log("Seed: Kanal bulunamadı (ID yanlış olabilir).");
-      return;
-    }
-    if (!ch.isTextBased()) {
-      console.log("Seed: Kanal text değil.");
-      return;
-    }
-
-    console.log(`Seed: Kanal bulundu -> #${ch.name}`);
-    await seedByDays(ch, SEED_DAYS, SEED_MAX);
-  } catch (e) {
-    console.error("Seed error:", e);
-  }
-});
-
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
@@ -702,26 +719,28 @@ client.on("messageCreate", async (message) => {
       const status = await fetchRobloxStatus();
 
       if (!status) {
-        await message.reply("Roblox API patladı gibi, yine dene.");
+        await message.reply("Roblox durumu çekemedim.");
         return;
       }
 
       if (status.presenceType === 0) {
-        await message.reply("Offline.");
+        await message.reply("offline.");
         return;
       }
 
       if (status.presenceType === 2) {
-        await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${status.lastLocation || "Bilinmiyor"}`);
+        await message.reply(
+          `Gökhan yine Robloxta aq.\nOyun: ${status.lastLocation || "Ne Bilim Aq"}`
+        );
         return;
       }
 
       if (status.presenceType === 3) {
-        await message.reply("Gökhan studio’da takılıyor.");
+        await message.reply("Gökhan nabıyon aq.");
         return;
       }
 
-      await message.reply("Online ama oyunda değil.");
+      await message.reply("online.");
       return;
     }
 
@@ -752,12 +771,10 @@ client.on("messageCreate", async (message) => {
 
         const now = Date.now();
         const elapsed = now - seedState.startedAt;
-        const status = seedState.running
-          ? "⏳ ÇALIŞIYOR"
-          : seedState.done
-          ? "✅ TAMAMLANDI"
-          : seedState.error
-          ? "❌ HATA"
+        const status =
+          seedState.running ? "⏳ ÇALIŞIYOR"
+          : seedState.done ? "✅ TAMAMLANDI"
+          : seedState.error ? "❌ HATA"
           : "⏸️ DURDU";
 
         const rate = Math.round(seedState.collected / Math.max(1, Math.floor(elapsed / 1000)));
@@ -782,6 +799,7 @@ client.on("messageCreate", async (message) => {
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
       if (!containsReligiousAbuse(content)) {
         const norm = normalizeText(content);
+
         memory.push(content);
         memorySet.add(norm);
 
@@ -835,7 +853,7 @@ client.on("messageCreate", async (message) => {
 });
 
 /* =========================
-   LOGIN + ERROR LOGS
+   LOGIN + DEBUG
 ========================= */
 console.log("Discord login başlıyor... token var mı?", Boolean(process.env.DISCORD_TOKEN));
 
