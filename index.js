@@ -141,52 +141,92 @@ function containsReligiousAbuse(text) {
 }
 
 /* =========================
-   ROBLOX (tek sistem + cache + cooldown)
+   FETCH TIMEOUT HELPER
+========================= */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/* =========================
+   ROBLOX (cache + fallback)
 ========================= */
 const placeNameCache = new Map(); // placeId -> { name, exp }
-const PLACE_CACHE_MS = 10 * 60 * 1000;
-
-// presence endpointini çok spamlemeyelim diye küçük cache
-let lastPresenceCache = null; // { data, exp }
-const PRESENCE_CACHE_MS = 8 * 1000;
+const universeNameCache = new Map(); // universeId -> { name, exp }
+const ROBLOX_CACHE_MS = 10 * 60 * 1000;
 
 async function fetchRobloxPlaceName(placeId) {
   if (!placeId) return null;
-
   const key = String(placeId);
   const cached = placeNameCache.get(key);
   if (cached && cached.exp > Date.now()) return cached.name;
 
   try {
-    // placeId -> oyun adı
-    const r = await fetch(
-      `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`
+    const r = await fetchWithTimeout(
+      `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`,
+      {},
+      12000
     );
     if (!r.ok) return null;
 
     const arr = await r.json();
     const name = arr?.[0]?.name || null;
 
-    placeNameCache.set(key, { name, exp: Date.now() + PLACE_CACHE_MS });
+    placeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
   } catch (e) {
-    console.error("Roblox place name error:", e);
+    console.error("Roblox place name error:", e?.name || e);
+    return null;
+  }
+}
+
+async function fetchRobloxUniverseName(universeId) {
+  if (!universeId) return null;
+  const key = String(universeId);
+  const cached = universeNameCache.get(key);
+  if (cached && cached.exp > Date.now()) return cached.name;
+
+  try {
+    // games endpoint universeIds ile isim dönebiliyor
+    const r = await fetchWithTimeout(
+      `https://games.roblox.com/v1/games?universeIds=${Number(universeId)}`,
+      {},
+      12000
+    );
+    if (!r.ok) return null;
+
+    const data = await r.json();
+    const name = data?.data?.[0]?.name || null;
+
+    universeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
+    return name;
+  } catch (e) {
+    console.error("Roblox universe name error:", e?.name || e);
     return null;
   }
 }
 
 async function fetchRobloxStatus() {
-  // kısa cache: arka arkaya yazınca API’yı dövmeyelim
-  if (lastPresenceCache && lastPresenceCache.exp > Date.now()) {
-    return lastPresenceCache.data;
-  }
-
   try {
-    const r = await fetch("https://presence.roblox.com/v1/presence/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
-    });
+    const r = await fetchWithTimeout(
+      "https://presence.roblox.com/v1/presence/users",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
+      },
+      12000
+    );
 
     if (!r.ok) return null;
 
@@ -196,23 +236,25 @@ async function fetchRobloxStatus() {
 
     const presenceType = p.userPresenceType; // 0=offline,1=online,2=in game,3=in studio
     const placeId = p.placeId || null;
+    const universeId = p.universeId || null;
     const lastLocation = (p.lastLocation || "").trim() || null;
 
-    // Eğer Roblox placeId vermiyorsa, oyun adı bulmak imkansız (privacy)
-    const placeName = placeId ? await fetchRobloxPlaceName(placeId) : null;
+    // Öncelik: placeId -> universeId -> lastLocation
+    let gameName = null;
+    if (placeId) gameName = await fetchRobloxPlaceName(placeId);
+    if (!gameName && universeId) gameName = await fetchRobloxUniverseName(universeId);
+    if (!gameName && lastLocation) gameName = lastLocation;
 
-    const out = {
+    return {
       presenceType,
       placeId,
+      universeId,
       lastLocation,
-      placeName,
-      raw: p, // debug
+      gameName,
+      raw: p,
     };
-
-    lastPresenceCache = { data: out, exp: Date.now() + PRESENCE_CACHE_MS };
-    return out;
   } catch (e) {
-    console.error("Roblox status error:", e);
+    console.error("Roblox status error:", e?.name || e);
     return null;
   }
 }
@@ -481,7 +523,7 @@ function generateSafeSentence() {
 }
 
 /* =========================
-   SEED (son X gün, max N) + progress
+   SEED (son X gün, max N) + progress + heartbeat + throttle + ratelimit
 ========================= */
 async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -502,6 +544,15 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
   const startedAt = seedState.startedAt;
   let lastLogAt = startedAt;
+  let lastBeat = 0;
+
+  const beat = (tag, extra = "") => {
+    const now = Date.now();
+    if (now - lastBeat >= 5000) {
+      lastBeat = now;
+      console.log(`[SEED] ${tag} fetch=${seedState.fetchCount} collected=${collected.length} ${extra}`);
+    }
+  };
 
   const logProgress = (force = false) => {
     const now = Date.now();
@@ -525,29 +576,64 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   console.log(`Seed başladı: son ${days} gün, max ${maxMessages} mesaj (#${channel.name})`);
 
   while (collected.length < maxMessages) {
+    // event loop'a nefes ver
+    await new Promise((r) => setImmediate(r));
+
     const batchSize = Math.min(100, maxMessages - collected.length);
     const opts = { limit: batchSize };
     if (beforeId) opts.before = beforeId;
 
+    beat("before-fetch", `beforeId=${beforeId ?? "none"}`);
+
     let msgs;
     try {
-      msgs = await channel.messages.fetch(opts);
+      // Discord fetch bazen network yüzünden takılı kalıyor gibi görünebilir.
+      // O yüzden "soft timeout": 20sn sonra hata gibi yakalayıp retry yapacağız.
+      msgs = await Promise.race([
+        channel.messages.fetch(opts),
+        (async () => {
+          await sleep(20000);
+          throw new Error("SEED_FETCH_TIMEOUT_20S");
+        })(),
+      ]);
     } catch (e) {
-      const retryAfter = (e?.data && e.data.retry_after) || e?.retry_after || null;
+      // rate limit yakalama (discord.js farklı yerlere koyabiliyor)
+      const retryAfter =
+        e?.data?.retry_after ??
+        e?.retry_after ??
+        e?.rawError?.retry_after ??
+        e?.response?.data?.retry_after ??
+        null;
+
       if (retryAfter) {
-        const waitMs = Math.ceil(retryAfter * 1000) + 200;
-        console.log(`Seed rate limit: ${waitMs}ms bekleniyor...`);
-        await new Promise((r) => setTimeout(r, waitMs));
+        const waitMs = Math.ceil(Number(retryAfter) * 1000) + 750;
+        console.log(`[SEED] RATE LIMIT: ${retryAfter}s -> ${waitMs}ms bekliyorum...`);
+        await sleep(waitMs);
         continue;
       }
+
+      // timeout ise biraz bekle retry
+      if ((e?.message || "").includes("SEED_FETCH_TIMEOUT_20S")) {
+        console.log("[SEED] fetch 20sn içinde dönmedi, 3sn bekleyip tekrar deniyorum...");
+        await sleep(3000);
+        continue;
+      }
+
       seedState.error = e?.message || String(e);
       seedState.running = false;
       seedState.done = false;
-      console.error("Seed fetch error:", e);
+
+      console.error("[SEED] FETCH ERROR:", {
+        name: e?.name,
+        code: e?.code,
+        message: e?.message,
+        status: e?.status,
+      });
       return;
     }
 
     seedState.fetchCount++;
+    beat("after-fetch", `size=${msgs?.size ?? 0}`);
 
     if (!msgs || msgs.size === 0) {
       console.log("Seed: fetch boş döndü, duruyor.");
@@ -566,7 +652,6 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
       const t = (m.content || "").trim();
       if (!t) continue;
-
       if (containsReligiousAbuse(t)) continue;
 
       collected.push(t);
@@ -582,6 +667,9 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
     }
 
     beforeId = msgs.last().id;
+
+    // throttle (rate-limit'i çok azaltır)
+    await sleep(350);
   }
 
   memory.length = 0;
@@ -612,7 +700,8 @@ const client = new Client({
   ],
 });
 
-client.once("ready", async () => {
+// discord.js v15 için (ready -> clientReady)
+async function onClientReady() {
   console.log(`Bot aktif: ${client.user.tag}`);
 
   try {
@@ -631,7 +720,11 @@ client.once("ready", async () => {
   } catch (e) {
     console.error("Seed error:", e);
   }
-});
+}
+
+// Her iki event'e de bağla (v14/v15 farkı)
+client.once("ready", onClientReady);
+client.once("clientReady", onClientReady);
 
 /* =========================
    HTTP SERVER (Koyeb healthcheck + cmd)
@@ -719,30 +812,14 @@ client.on("messageCreate", async (message) => {
     const content = (message.content || "").trim();
     const lower = content.toLowerCase();
 
-    // === *gökhanraw (debug) ===
-    if (lower === "*gökhanraw") {
-      const status = await fetchRobloxStatus();
-      if (!status) {
-        await message.reply("Roblox durumu çekemedim.");
-        return;
-      }
-      // discord 2000 char limit → kısalt
-      const raw = JSON.stringify(status.raw, null, 2);
-      const clipped = raw.length > 1800 ? raw.slice(0, 1800) + "\n...(clipped)" : raw;
-      await message.reply("```json\n" + clipped + "\n```");
-      return;
-    }
-
     // === *gökhan (Roblox status) ===
-    if (lower === "*gökhan") {
+    if (lower === "*gökhan" || lower === "*gokhan") {
       const status = await fetchRobloxStatus();
 
       if (!status) {
         await message.reply("Roblox durumu çekemedim.");
         return;
       }
-
-      // İstersen bunu kapat: console.log("ROBLOX RAW:", status.raw);
 
       if (status.presenceType === 0) {
         await message.reply("offline.");
@@ -755,21 +832,20 @@ client.on("messageCreate", async (message) => {
       }
 
       if (status.presenceType === 2) {
-        // Roblox oyun bilgisini vermiyorsa (privacy / kısıt)
-        const noInfo =
-          !status.placeId && !status.placeName && !status.lastLocation;
+        // Roblox bazen hiçbir bilgi vermiyor (placeId=null lastLocation='' universeId=null)
+        let gameText = status.gameName;
 
-        if (noInfo) {
-          await message.reply(
-            "Oyunda gözüküyor ama Roblox oyun bilgisini vermiyor (privacy ayarı yüzünden)."
-          );
-          return;
+        if (!gameText) {
+          if (!status.placeId && !status.universeId && !status.lastLocation) {
+            gameText = "Roblox oyun bilgisini göndermiyor (placeId/universeId yok).";
+          } else {
+            gameText =
+              status.lastLocation ||
+              (status.placeId ? `placeId=${status.placeId}` : null) ||
+              (status.universeId ? `universeId=${status.universeId}` : null) ||
+              "Bilinmiyor";
+          }
         }
-
-        const gameText =
-          status.placeName ||
-          status.lastLocation ||
-          (status.placeId ? `placeId=${status.placeId}` : "Bilinmiyor");
 
         await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${gameText}`);
         return;
@@ -779,26 +855,32 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    // === *gökhanraw (admin debug) ===
+    if ((lower === "*gökhanraw" || lower === "*gokhanraw") && message.author.id === ADMIN_USER_ID) {
+      const status = await fetchRobloxStatus();
+      await message.reply("Konsola raw bastım.");
+      console.log("ROBLOX RAW:", status?.raw);
+      return;
+    }
+
     // === ADMIN KOMUTLARI ===
     if (message.author.id === ADMIN_USER_ID) {
-      const cmd = lower;
-
-      if (cmd === "*reaction off") {
+      if (lower === "*reaction off") {
         reactionsEnabled = false;
         await message.reply("⛔ Reaction kapalı");
         return;
       }
-      if (cmd === "*reaction on") {
+      if (lower === "*reaction on") {
         reactionsEnabled = true;
         await message.reply("✅ Reaction açık");
         return;
       }
-      if (cmd === "*reaction status") {
+      if (lower === "*reaction status") {
         await message.reply(reactionsEnabled ? "✅ AÇIK" : "⛔ KAPALI");
         return;
       }
 
-      if (cmd === "*seed status") {
+      if (lower === "*seed status") {
         if (!seedState.startedAt) {
           await message.reply("Seed daha başlamadı.");
           return;
@@ -880,7 +962,6 @@ client.on("messageCreate", async (message) => {
 
     if (!has1) await message.react(EMOJI_1);
     if (!has2) await message.react(EMOJI_2);
-
   } catch (e) {
     console.error(e);
   }
