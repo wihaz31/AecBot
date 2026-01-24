@@ -141,10 +141,14 @@ function containsReligiousAbuse(text) {
 }
 
 /* =========================
-   ROBLOX (tek sistem + cache)
+   ROBLOX (tek sistem + cache + cooldown)
 ========================= */
 const placeNameCache = new Map(); // placeId -> { name, exp }
 const PLACE_CACHE_MS = 10 * 60 * 1000;
+
+// presence endpointini çok spamlemeyelim diye küçük cache
+let lastPresenceCache = null; // { data, exp }
+const PRESENCE_CACHE_MS = 8 * 1000;
 
 async function fetchRobloxPlaceName(placeId) {
   if (!placeId) return null;
@@ -172,6 +176,11 @@ async function fetchRobloxPlaceName(placeId) {
 }
 
 async function fetchRobloxStatus() {
+  // kısa cache: arka arkaya yazınca API’yı dövmeyelim
+  if (lastPresenceCache && lastPresenceCache.exp > Date.now()) {
+    return lastPresenceCache.data;
+  }
+
   try {
     const r = await fetch("https://presence.roblox.com/v1/presence/users", {
       method: "POST",
@@ -187,17 +196,21 @@ async function fetchRobloxStatus() {
 
     const presenceType = p.userPresenceType; // 0=offline,1=online,2=in game,3=in studio
     const placeId = p.placeId || null;
-    const lastLocation = p.lastLocation || null;
+    const lastLocation = (p.lastLocation || "").trim() || null;
 
+    // Eğer Roblox placeId vermiyorsa, oyun adı bulmak imkansız (privacy)
     const placeName = placeId ? await fetchRobloxPlaceName(placeId) : null;
 
-    return {
+    const out = {
       presenceType,
       placeId,
       lastLocation,
       placeName,
-      raw: p, // debug için
+      raw: p, // debug
     };
+
+    lastPresenceCache = { data: out, exp: Date.now() + PRESENCE_CACHE_MS };
+    return out;
   } catch (e) {
     console.error("Roblox status error:", e);
     return null;
@@ -704,9 +717,24 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const content = (message.content || "").trim();
+    const lower = content.toLowerCase();
+
+    // === *gökhanraw (debug) ===
+    if (lower === "*gökhanraw") {
+      const status = await fetchRobloxStatus();
+      if (!status) {
+        await message.reply("Roblox durumu çekemedim.");
+        return;
+      }
+      // discord 2000 char limit → kısalt
+      const raw = JSON.stringify(status.raw, null, 2);
+      const clipped = raw.length > 1800 ? raw.slice(0, 1800) + "\n...(clipped)" : raw;
+      await message.reply("```json\n" + clipped + "\n```");
+      return;
+    }
 
     // === *gökhan (Roblox status) ===
-    if (content.toLowerCase() === "*gökhan") {
+    if (lower === "*gökhan") {
       const status = await fetchRobloxStatus();
 
       if (!status) {
@@ -714,8 +742,7 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      // İstersen bunu yorum satırı yap: Bilinmiyor geliyorsa p raw’da ne var görürsün.
-      console.log("ROBLOX RAW:", status.raw);
+      // İstersen bunu kapat: console.log("ROBLOX RAW:", status.raw);
 
       if (status.presenceType === 0) {
         await message.reply("offline.");
@@ -728,11 +755,21 @@ client.on("messageCreate", async (message) => {
       }
 
       if (status.presenceType === 2) {
+        // Roblox oyun bilgisini vermiyorsa (privacy / kısıt)
+        const noInfo =
+          !status.placeId && !status.placeName && !status.lastLocation;
+
+        if (noInfo) {
+          await message.reply(
+            "Oyunda gözüküyor ama Roblox oyun bilgisini vermiyor (privacy ayarı yüzünden)."
+          );
+          return;
+        }
+
         const gameText =
           status.placeName ||
           status.lastLocation ||
-          (status.placeId ? `placeId=${status.placeId}` : null) ||
-          "Bilinmiyor";
+          (status.placeId ? `placeId=${status.placeId}` : "Bilinmiyor");
 
         await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${gameText}`);
         return;
@@ -744,7 +781,7 @@ client.on("messageCreate", async (message) => {
 
     // === ADMIN KOMUTLARI ===
     if (message.author.id === ADMIN_USER_ID) {
-      const cmd = content.toLowerCase();
+      const cmd = lower;
 
       if (cmd === "*reaction off") {
         reactionsEnabled = false;
@@ -843,6 +880,7 @@ client.on("messageCreate", async (message) => {
 
     if (!has1) await message.react(EMOJI_1);
     if (!has2) await message.react(EMOJI_2);
+
   } catch (e) {
     console.error(e);
   }
