@@ -342,6 +342,43 @@ function tokenize(text) {
 }
 
 /* =========================
+   BASİT SEÇİM SORULARI
+========================= */
+function handleSimpleChoiceQuestion(text) {
+  // "x mi y mi" kalıbı (Türkçe karakter desteği ile)
+  const match = text.match(/(.+?)\s+mi\s+(.+?)\s+mi/i);
+  if (match) {
+    const secenek1 = match[1].trim();
+    const secenek2 = match[2].trim();
+    // Rastgele birini seç
+    return Math.random() < 0.5 ? secenek1 : secenek2;
+  }
+
+  // "x yoksa y" kalıbı
+  const match2 = text.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
+  if (match2) {
+    const secenek1 = match2[1].trim();
+    const secenek2 = match2[2].trim();
+    return Math.random() < 0.5 ? secenek1 : secenek2;
+  }
+
+  // "x veya y" kalıbı
+  const match3 = text.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
+  if (match3) {
+    const secenek1 = match3[1].trim();
+    const secenek2 = match3[2].trim();
+    return Math.random() < 0.5 ? secenek1 : secenek2;
+  }
+
+  // "evet mi hayır mı" gibi ikili sorular
+  if (text.match(/evet mi hayır mı/i)) {
+    return Math.random() < 0.5 ? "evet" : "hayır";
+  }
+
+  return null; // tanımlanamadı
+}
+
+/* =========================
    SMART REPLY (Sadece @mention için)
 ========================= */
 function jaccard(aSet, bSet) {
@@ -925,20 +962,33 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    // === @MENTION CEVAP (SMART REPLY + fallback) ===
+    // === @MENTION CEVAP (önce basit seçim sorularını dene, sonra smart reply + fallback) ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
+      // Önce basit seçim sorusu kontrolü
+      const choiceAnswer = handleSimpleChoiceQuestion(content);
+      if (choiceAnswer) {
+        await message.reply(choiceAnswer);
+        return;
+      }
+
+      // Yoksa eski smart reply veya markov
       const smart = smartReplyFor(content);
       const out = smart || generateSafeSentence();
       await message.reply(out);
       return;
     }
 
-    // === BOT MESAJINA REPLY ===
+    // === BOT MESAJINA REPLY (önce basit seçim sorularını dene) ===
     if (
       message.reference &&
       message.mentions.repliedUser?.id === client.user.id &&
       Math.random() < REPLY_RESPONSE_CHANCE
     ) {
+      const choiceAnswer = handleSimpleChoiceQuestion(content);
+      if (choiceAnswer) {
+        await message.reply(choiceAnswer);
+        return;
+      }
       const out = generateSafeSentence();
       await message.reply(out);
       return;
