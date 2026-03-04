@@ -342,19 +342,18 @@ function tokenize(text) {
 }
 
 /* =========================
-   BASİT SEÇİM SORULARI
+   BASIT SEÇIM SORUSU TANIMA (TÜRKÇE TÜM EKLERLE)
 ========================= */
 function handleSimpleChoiceQuestion(text) {
-  // "x mi y mi" kalıbı (Türkçe karakter desteği ile)
-  const match = text.match(/(.+?)\s+mi\s+(.+?)\s+mi/i);
+  // "X mı/mi/mu/mü Y mı/mi/mu/mü" kalıbı (tüm ek varyasyonları)
+  const match = text.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
   if (match) {
     const secenek1 = match[1].trim();
-    const secenek2 = match[2].trim();
-    // Rastgele birini seç
+    const secenek2 = match[3].trim();
     return Math.random() < 0.5 ? secenek1 : secenek2;
   }
 
-  // "x yoksa y" kalıbı
+  // "X yoksa Y" kalıbı
   const match2 = text.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
   if (match2) {
     const secenek1 = match2[1].trim();
@@ -362,7 +361,7 @@ function handleSimpleChoiceQuestion(text) {
     return Math.random() < 0.5 ? secenek1 : secenek2;
   }
 
-  // "x veya y" kalıbı
+  // "X veya Y" kalıbı
   const match3 = text.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
   if (match3) {
     const secenek1 = match3[1].trim();
@@ -370,8 +369,8 @@ function handleSimpleChoiceQuestion(text) {
     return Math.random() < 0.5 ? secenek1 : secenek2;
   }
 
-  // "evet mi hayır mı" gibi ikili sorular
-  if (text.match(/evet mi hayır mı/i)) {
+  // "evet mi hayır mı" (ve diğer ikili özel durumlar)
+  if (text.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
     return Math.random() < 0.5 ? "evet" : "hayır";
   }
 
@@ -962,7 +961,7 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    // === @MENTION CEVAP (önce basit seçim sorularını dene, sonra smart reply + fallback) ===
+    // === @MENTION CEVAP (ÖNCE SEÇİM SORUSU, SONRA SMART REPLY) ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
       // Önce basit seçim sorusu kontrolü
       const choiceAnswer = handleSimpleChoiceQuestion(content);
@@ -978,7 +977,7 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // === BOT MESAJINA REPLY (önce basit seçim sorularını dene) ===
+    // === BOT MESAJINA REPLY (ÖNCE SEÇİM SORUSU) ===
     if (
       message.reference &&
       message.mentions.repliedUser?.id === client.user.id &&
