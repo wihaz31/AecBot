@@ -342,6 +342,14 @@ function tokenize(text) {
 }
 
 /* =========================
+   MESAJDAN MENTIONLARI TEMİZLE
+========================= */
+function removeMentions(text) {
+  // <@!123456> veya <@123456> şeklindeki mentionları kaldır
+  return text.replace(/<@!?(\d+)>/g, '').trim();
+}
+
+/* =========================
    BASIT SEÇIM SORUSU TANIMA (TÜRKÇE TÜM EKLERLE)
 ========================= */
 function handleSimpleChoiceQuestion(text) {
@@ -733,6 +741,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages, // DM mesajlarını alabilmek için
   ],
 });
 
@@ -847,6 +856,15 @@ client.on("messageCreate", async (message) => {
 
     const content = (message.content || "").trim();
     const lower = content.toLowerCase();
+
+    // === DM'den admin mesajlarını kanala yönlendir ===
+    if (message.guild === null && message.author.id === ADMIN_USER_ID) {
+      const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
+      if (targetChannel && targetChannel.isTextBased()) {
+        await targetChannel.send(content);
+      }
+      return; // Mesajı tüket, başka işlem yapma
+    }
 
     // === *gökhan (Roblox status) ===
     if (lower === "*gökhan" || lower === "*gokhan") {
@@ -963,15 +981,17 @@ client.on("messageCreate", async (message) => {
 
     // === @MENTION CEVAP (ÖNCE SEÇİM SORUSU, SONRA SMART REPLY) ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-      // Önce basit seçim sorusu kontrolü
-      const choiceAnswer = handleSimpleChoiceQuestion(content);
+      // Mentionları temizle
+      const cleanedContent = removeMentions(content);
+      // Önce basit seçim sorusu kontrolü (temizlenmiş metin ile)
+      const choiceAnswer = handleSimpleChoiceQuestion(cleanedContent);
       if (choiceAnswer) {
         await message.reply(choiceAnswer);
         return;
       }
 
-      // Yoksa eski smart reply veya markov
-      const smart = smartReplyFor(content);
+      // Yoksa eski smart reply veya markov (yine temizlenmiş metin ile)
+      const smart = smartReplyFor(cleanedContent);
       const out = smart || generateSafeSentence();
       await message.reply(out);
       return;
