@@ -342,19 +342,16 @@ function tokenize(text) {
 }
 
 /* =========================
-   MESAJDAN MENTIONLARI TEMİZLE
-========================= */
-function removeMentions(text) {
-  // <@!123456> veya <@123456> şeklindeki mentionları kaldır
-  return text.replace(/<@!?(\d+)>/g, '').trim();
-}
-
-/* =========================
    BASIT SEÇIM SORUSU TANIMA (TÜRKÇE TÜM EKLERLE)
+   - mention'ları temizleyerek çalışır
 ========================= */
 function handleSimpleChoiceQuestion(text) {
+  // Önce mention'ları kaldır (botun kendi ID'si de dahil)
+  const cleanText = text.replace(/<@!?(\d+)>/g, "").trim();
+  if (!cleanText) return null;
+
   // "X mı/mi/mu/mü Y mı/mi/mu/mü" kalıbı (tüm ek varyasyonları)
-  const match = text.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
+  const match = cleanText.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
   if (match) {
     const secenek1 = match[1].trim();
     const secenek2 = match[3].trim();
@@ -362,7 +359,7 @@ function handleSimpleChoiceQuestion(text) {
   }
 
   // "X yoksa Y" kalıbı
-  const match2 = text.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
+  const match2 = cleanText.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
   if (match2) {
     const secenek1 = match2[1].trim();
     const secenek2 = match2[2].trim();
@@ -370,7 +367,7 @@ function handleSimpleChoiceQuestion(text) {
   }
 
   // "X veya Y" kalıbı
-  const match3 = text.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
+  const match3 = cleanText.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
   if (match3) {
     const secenek1 = match3[1].trim();
     const secenek2 = match3[2].trim();
@@ -378,7 +375,7 @@ function handleSimpleChoiceQuestion(text) {
   }
 
   // "evet mi hayır mı" (ve diğer ikili özel durumlar)
-  if (text.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
+  if (cleanText.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
     return Math.random() < 0.5 ? "evet" : "hayır";
   }
 
@@ -741,7 +738,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages, // DM mesajlarını alabilmek için
+    GatewayIntentBits.DirectMessages, // DM mesajlarını almak için eklendi
   ],
 });
 
@@ -855,16 +852,22 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const content = (message.content || "").trim();
-    const lower = content.toLowerCase();
 
-    // === DM'den admin mesajlarını kanala yönlendir ===
+    // === DM'den admin mesajlarını hedef kanala yönlendir ===
+    // (Sunucu dışı = DM, sadece admin)
     if (message.guild === null && message.author.id === ADMIN_USER_ID) {
+      console.log(`DM from admin: ${content}`);
       const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
       if (targetChannel && targetChannel.isTextBased()) {
+        // İsterseniz ek bir önek ekleyebilirsiniz: `📨 ${content}`
         await targetChannel.send(content);
+      } else {
+        console.log("Hedef kanal bulunamadı veya text değil.");
       }
       return; // Mesajı tüket, başka işlem yapma
     }
+
+    const lower = content.toLowerCase();
 
     // === *gökhan (Roblox status) ===
     if (lower === "*gökhan" || lower === "*gokhan") {
@@ -981,17 +984,15 @@ client.on("messageCreate", async (message) => {
 
     // === @MENTION CEVAP (ÖNCE SEÇİM SORUSU, SONRA SMART REPLY) ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-      // Mentionları temizle
-      const cleanedContent = removeMentions(content);
-      // Önce basit seçim sorusu kontrolü (temizlenmiş metin ile)
-      const choiceAnswer = handleSimpleChoiceQuestion(cleanedContent);
+      // Önce basit seçim sorusu kontrolü (mention'lar temizlenmiş halde)
+      const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) {
         await message.reply(choiceAnswer);
         return;
       }
 
-      // Yoksa eski smart reply veya markov (yine temizlenmiş metin ile)
-      const smart = smartReplyFor(cleanedContent);
+      // Yoksa eski smart reply veya markov
+      const smart = smartReplyFor(content);
       const out = smart || generateSafeSentence();
       await message.reply(out);
       return;
