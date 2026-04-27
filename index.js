@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const dns = require("dns");
-dns.setDefaultResultOrder("ipv4first"); // Discord WS için sık fix
+dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const { URL } = require("url");
@@ -36,7 +36,11 @@ const PORT = process.env.PORT || 8000;
 const CMD_KEY = process.env.CMD_KEY || "";
 
 // Roblox
-const ROBLOX_USER_ID = "2575829815"; // sayı string de olur
+const ROBLOX_USER_ID = "2575829815";
+
+// Gemini
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 /* =========================
    SEED DURUMU
@@ -66,11 +70,10 @@ function formatDuration(ms) {
 }
 
 /* =========================
-   HAFIZA + BENZERLİK ENGELLEME
+   HAFIZA
 ========================= */
 const memory = [];
 const MAX_WORDS_PER_MESSAGE = 40;
-
 const memorySet = new Set();
 const botRecentSet = new Set();
 const BOT_RECENT_LIMIT = 200;
@@ -85,28 +88,16 @@ const WORD_POOL = [
   "lol","lmao","wtf","idk","imo","fr","no cap","cap","sheesh",
   "mid","npc","lowkey","skill issue","touch grass",
   "gg","ez","ff","go next","tryhard","toxic","hardstuck",
-  "smurf","boosted","nerf","buff",
-  "yasuo","yone","zed","akali","lee sin","viego","ahri","jinx","caitlyn",
-  "thresh","lux","riven","faker","keria","gumayusi",
-  "soloQ","ranked","normal","aram",
-  "midlane","toplane","botlane","jungle","support",
-  "gank","outplay","int","feed","carry","snowball","oneshot","burst",
-  "kite","peel","macro","micro","meta",
-  "bronze","silver","gold","emerald","diamond","master","challenger",
 ];
 
 /* =========================
-   SADECE "DİN + KÜFÜR" ENGELİ
+   DİN + KÜFÜR ENGELİ
 ========================= */
 function foldTR(s) {
   return (s || "")
     .toLowerCase()
-    .replace(/ı/g, "i")
-    .replace(/ğ/g, "g")
-    .replace(/ü/g, "u")
-    .replace(/ş/g, "s")
-    .replace(/ö/g, "o")
-    .replace(/ç/g, "c");
+    .replace(/ı/g, "i").replace(/ğ/g, "g").replace(/ü/g, "u")
+    .replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c");
 }
 
 function squash(s) {
@@ -119,9 +110,8 @@ function squash(s) {
 }
 
 const RELIGIOUS_TERMS = [
-  "allah","tanri","peygamber","muhammed","4ll4h","4LLL4H12N1S1KEY1M",
+  "allah","tanri","peygamber","muhammed","4ll4h",
   "kuran","kur an","allanı","muhammedini","peygamberini",
-  "kitabını","kitabini","allahuınukşitabını","allahuinukşitabini",
 ].map(squash);
 
 const SWEAR_TERMS = [
@@ -135,9 +125,7 @@ function containsReligiousAbuse(text) {
   if (!t) return false;
   const hasRel = RELIGIOUS_TERMS.some((r) => t.includes(r));
   if (!hasRel) return false;
-  const hasSwear = SWEAR_TERMS.some((w) => t.includes(w));
-  if (!hasSwear) return false;
-  return true;
+  return SWEAR_TERMS.some((w) => t.includes(w));
 }
 
 /* =========================
@@ -147,8 +135,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: ctrl.signal });
-    return res;
+    return await fetch(url, { ...options, signal: ctrl.signal });
   } finally {
     clearTimeout(t);
   }
@@ -159,10 +146,143 @@ function sleep(ms) {
 }
 
 /* =========================
-   ROBLOX (cache + fallback)
+   GEMINI AI
 ========================= */
-const placeNameCache = new Map(); // placeId -> { name, exp }
-const universeNameCache = new Map(); // universeId -> { name, exp }
+
+// Son N mesajı örnek olarak context'e ekle
+function buildContextSamples(n = 30) {
+  if (memory.length === 0) return "";
+  const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
+  if (usable.length === 0) return "";
+  const sample = usable.slice(-n);
+  return sample.join("\n");
+}
+
+/**
+ * Gemini'ye istek at.
+ * @param {string} userMessage  - kullanıcının mesajı (mention/reply için)
+ * @param {boolean} isRandom    - true ise rastgele mesaj üret (mention yok)
+ * @returns {Promise<string|null>}
+ */
+async function askGemini(userMessage = null, isRandom = false) {
+  if (!GEMINI_API_KEY) return null;
+
+  const contextSamples = buildContextSamples(40);
+
+  // System talimatı: sunucunun tonunu öğret
+  const systemInstruction = `Sen bir Discord sunucusunda konuşan bir Türk gençsin. 
+Sunucunun genel konuşma tarzını benimsiyorsun: kısa, samimi, bazen argo, internet slang kullanıyorsun.
+Emoji kullanabilirsin ama abartma. Çok uzun cevaplar verme (1-3 cümle yeterli).
+Dini hakaretler veya ırk ayrımcılığı içeren hiçbir şey söyleme.
+Markdown kullanma (bold, italik, kod bloğu yok).
+Aşağıda sunucudan örnek mesajlar var, bu tona yakın konuş:
+
+--- ÖRNEK MESAJLAR ---
+${contextSamples || "(henüz yok)"}
+--- /ÖRNEK MESAJLAR ---`;
+
+  let prompt;
+  if (isRandom) {
+    prompt = "Sunucuya kısa, random bir şey yaz. Kendi kendine bir şey söyle, soru sorma.";
+  } else {
+    prompt = userMessage || "Merhaba";
+  }
+
+  const body = {
+    system_instruction: { parts: [{ text: systemInstruction }] },
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      maxOutputTokens: 120,
+      temperature: 0.95,
+      topP: 0.9,
+    },
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+    ],
+  };
+
+  try {
+    const res = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      15000
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[GEMINI] HTTP ${res.status}:`, errText.slice(0, 200));
+      return null;
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) return null;
+
+    // Dini hakaret filtrele
+    if (containsReligiousAbuse(text)) return null;
+
+    return text;
+  } catch (e) {
+    console.error("[GEMINI] Error:", e?.name, e?.message?.slice(0, 100));
+    return null;
+  }
+}
+
+/* =========================
+   FALLBACK: basit kelime üret (Gemini çalışmazsa)
+========================= */
+function randomFrom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function randomSentence() {
+  const len = Math.floor(Math.random() * 4) + 3;
+  const words = [];
+  for (let i = 0; i < len; i++) words.push(randomFrom(WORD_POOL));
+  return words.join(" ");
+}
+
+/* =========================
+   BASIT SEÇIM SORUSU (Türkçe)
+========================= */
+function handleSimpleChoiceQuestion(text) {
+  const cleanText = text.replace(/<@!?(\d+)>/g, "").trim();
+  if (!cleanText) return null;
+
+  const match = cleanText.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
+  if (match) {
+    return Math.random() < 0.5 ? match[1].trim() : match[3].trim();
+  }
+
+  const match2 = cleanText.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
+  if (match2) {
+    return Math.random() < 0.5 ? match2[1].trim() : match2[2].trim();
+  }
+
+  const match3 = cleanText.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
+  if (match3) {
+    return Math.random() < 0.5 ? match3[1].trim() : match3[2].trim();
+  }
+
+  if (cleanText.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
+    return Math.random() < 0.5 ? "evet" : "hayır";
+  }
+
+  return null;
+}
+
+/* =========================
+   ROBLOX (cache + presence)
+========================= */
+const placeNameCache = new Map();
+const universeNameCache = new Map();
 const ROBLOX_CACHE_MS = 10 * 60 * 1000;
 
 async function fetchRobloxPlaceName(placeId) {
@@ -178,14 +298,12 @@ async function fetchRobloxPlaceName(placeId) {
       12000
     );
     if (!r.ok) return null;
-
     const arr = await r.json();
     const name = arr?.[0]?.name || null;
-
     placeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
   } catch (e) {
-    console.error("Roblox place name error:", e?.name || e);
+    console.error("Roblox place name error:", e?.name);
     return null;
   }
 }
@@ -197,21 +315,36 @@ async function fetchRobloxUniverseName(universeId) {
   if (cached && cached.exp > Date.now()) return cached.name;
 
   try {
-    // games endpoint universeIds ile isim dönebiliyor
     const r = await fetchWithTimeout(
       `https://games.roblox.com/v1/games?universeIds=${Number(universeId)}`,
       {},
       12000
     );
     if (!r.ok) return null;
-
     const data = await r.json();
     const name = data?.data?.[0]?.name || null;
-
     universeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
   } catch (e) {
-    console.error("Roblox universe name error:", e?.name || e);
+    console.error("Roblox universe name error:", e?.name);
+    return null;
+  }
+}
+
+// thumbnails API'si üzerinden universe ID çek (placeId'den)
+async function fetchUniverseIdFromPlace(placeId) {
+  if (!placeId) return null;
+  try {
+    const r = await fetchWithTimeout(
+      `https://apis.roblox.com/universes/v1/places/${Number(placeId)}/universe`,
+      {},
+      12000
+    );
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.universeId || null;
+  } catch (e) {
+    console.error("Roblox universe-from-place error:", e?.name);
     return null;
   }
 }
@@ -234,341 +367,37 @@ async function fetchRobloxStatus() {
     const p = data?.userPresences?.[0];
     if (!p) return null;
 
-    const presenceType = p.userPresenceType; // 0=offline,1=online,2=in game,3=in studio
+    const presenceType = p.userPresenceType;
     const placeId = p.placeId || null;
-    const universeId = p.universeId || null;
+    let universeId = p.universeId || null;
     const lastLocation = (p.lastLocation || "").trim() || null;
 
-    // Öncelik: placeId -> universeId -> lastLocation
+    // universeId yoksa placeId'den türet
+    if (!universeId && placeId) {
+      universeId = await fetchUniverseIdFromPlace(placeId);
+    }
+
     let gameName = null;
     if (placeId) gameName = await fetchRobloxPlaceName(placeId);
     if (!gameName && universeId) gameName = await fetchRobloxUniverseName(universeId);
     if (!gameName && lastLocation) gameName = lastLocation;
 
-    return {
-      presenceType,
-      placeId,
-      universeId,
-      lastLocation,
-      gameName,
-      raw: p,
-    };
+    return { presenceType, placeId, universeId, lastLocation, gameName, raw: p };
   } catch (e) {
-    console.error("Roblox status error:", e?.name || e);
+    console.error("Roblox status error:", e?.name);
     return null;
   }
 }
 
 /* =========================
-   YARDIMCILAR
+   SEED
 ========================= */
-function randomFrom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function randomSentence() {
-  const len = Math.floor(Math.random() * 6) + 5; // 5–10
-  const words = [];
-  for (let i = 0; i < len; i++) words.push(randomFrom(WORD_POOL));
-  let s = words.join(" ");
-  s = s.charAt(0).toUpperCase() + s.slice(1);
-  s += Math.random() < 0.2 ? "..." : ".";
-  return s;
-}
-
 function normalizeText(s) {
-  return (s || "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/[.?!…]+$/g, "");
+  return (s || "").toLowerCase().trim().replace(/\s+/g, " ").replace(/[.?!…]+$/g, "");
 }
 
-function rememberBotOutput(text) {
-  const n = normalizeText(text);
-  if (!n) return;
-
-  botRecentSet.add(n);
-  if (botRecentSet.size > BOT_RECENT_LIMIT) {
-    const first = botRecentSet.values().next().value;
-    botRecentSet.delete(first);
-  }
-}
-
-function tooSimilar(candidate) {
-  const cand = normalizeText(candidate);
-  if (!cand) return true;
-
-  if (memorySet.has(cand)) return true;
-  if (botRecentSet.has(cand)) return true;
-
-  const candWords = cand.split(" ").filter(Boolean);
-  if (candWords.length < 4) return true;
-
-  const candSet = new Set(candWords);
-
-  const samples = Math.min(90, memory.length);
-  for (let i = 0; i < samples; i++) {
-    const m = normalizeText(memory[Math.floor(Math.random() * memory.length)]);
-    if (!m) continue;
-
-    if (m.slice(0, 22) === cand.slice(0, 22)) return true;
-
-    const mWords = m.split(" ").filter(Boolean);
-    const mSet = new Set(mWords);
-
-    let inter = 0;
-    for (const w of candSet) if (mSet.has(w)) inter++;
-
-    const union = candSet.size + mSet.size - inter;
-    const jacc = union ? inter / union : 0;
-
-    const threshold = candWords.length <= 8 ? 0.50 : 0.62;
-    if (jacc >= threshold) return true;
-  }
-
-  return false;
-}
-
-function tokenize(text) {
-  return (text || "")
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/<@!?(\d+)>/g, "")
-    .replace(/[^\p{L}\p{N}\s'-]+/gu, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, MAX_WORDS_PER_MESSAGE);
-}
-
-/* =========================
-   BASIT SEÇIM SORUSU TANIMA (TÜRKÇE TÜM EKLERLE)
-   - mention'ları temizleyerek çalışır
-========================= */
-function handleSimpleChoiceQuestion(text) {
-  // Önce mention'ları kaldır (botun kendi ID'si de dahil)
-  const cleanText = text.replace(/<@!?(\d+)>/g, "").trim();
-  if (!cleanText) return null;
-
-  // "X mı/mi/mu/mü Y mı/mi/mu/mü" kalıbı (tüm ek varyasyonları)
-  const match = cleanText.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
-  if (match) {
-    const secenek1 = match[1].trim();
-    const secenek2 = match[3].trim();
-    return Math.random() < 0.5 ? secenek1 : secenek2;
-  }
-
-  // "X yoksa Y" kalıbı
-  const match2 = cleanText.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
-  if (match2) {
-    const secenek1 = match2[1].trim();
-    const secenek2 = match2[2].trim();
-    return Math.random() < 0.5 ? secenek1 : secenek2;
-  }
-
-  // "X veya Y" kalıbı
-  const match3 = cleanText.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
-  if (match3) {
-    const secenek1 = match3[1].trim();
-    const secenek2 = match3[2].trim();
-    return Math.random() < 0.5 ? secenek1 : secenek2;
-  }
-
-  // "evet mi hayır mı" (ve diğer ikili özel durumlar)
-  if (cleanText.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
-    return Math.random() < 0.5 ? "evet" : "hayır";
-  }
-
-  return null; // tanımlanamadı
-}
-
-/* =========================
-   SMART REPLY (Sadece @mention için)
-========================= */
-function jaccard(aSet, bSet) {
-  if (!aSet.size || !bSet.size) return 0;
-  let inter = 0;
-  for (const w of aSet) if (bSet.has(w)) inter++;
-  const union = aSet.size + bSet.size - inter;
-  return union ? inter / union : 0;
-}
-
-function smartReplyFor(inputText) {
-  if (!memory || memory.length < 200) return null;
-
-  const inTok = tokenize(inputText);
-  if (inTok.length < 2) return null;
-  const inSet = new Set(inTok);
-
-  const usableLen = Math.max(0, memory.length - RECENT_EXCLUDE);
-  if (usableLen < 5) return null;
-
-  const SAMPLE = Math.min(1500, usableLen - 1);
-  let bestIdx = -1;
-  let bestScore = 0;
-
-  for (let i = 0; i < SAMPLE; i++) {
-    const idx = Math.floor(Math.random() * (usableLen - 1));
-    const q = memory[idx];
-    const a = memory[idx + 1];
-    if (!q || !a) continue;
-    if (containsReligiousAbuse(a)) continue;
-
-    const qTok = tokenize(q);
-    if (qTok.length < 2) continue;
-
-    const score = jaccard(inSet, new Set(qTok));
-    if (score > bestScore) {
-      bestScore = score;
-      bestIdx = idx + 1;
-    }
-  }
-
-  if (bestIdx === -1 || bestScore < 0.18) return null;
-
-  const candidate = memory[bestIdx];
-  if (!candidate) return null;
-  if (tooSimilar(candidate)) return null;
-  if (containsReligiousAbuse(candidate)) return null;
-
-  return candidate;
-}
-
-/* =========================
-   MARKOV MODEL
-========================= */
-function buildMarkov3(messages) {
-  const map = new Map();
-  for (const msg of messages) {
-    const w = tokenize(msg);
-    if (w.length < 4) continue;
-    for (let i = 0; i < w.length - 3; i++) {
-      const key = `${w[i]}|${w[i + 1]}|${w[i + 2]}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(w[i + 3]);
-    }
-  }
-  return map;
-}
-
-function randomChatWord() {
-  if (memory.length === 0) return null;
-  for (let i = 0; i < 12; i++) {
-    const msg = randomFrom(memory);
-    const words = tokenize(msg);
-    if (words.length > 0) return randomFrom(words);
-  }
-  return null;
-}
-
-function injectNoiseFromChat(words) {
-  if (Math.random() < 0.15) return words;
-
-  const minReplace = 3;
-  const extra = Math.floor(Math.random() * 4);
-  const replaceCount = Math.min(words.length, minReplace + extra);
-
-  const usedIdx = new Set();
-  for (let i = 0; i < replaceCount; i++) {
-    let idx = Math.floor(Math.random() * words.length);
-    let guard = 0;
-    while (usedIdx.has(idx) && guard++ < 10) idx = Math.floor(Math.random() * words.length);
-    usedIdx.add(idx);
-
-    const w = randomChatWord() ?? randomFrom(WORD_POOL);
-    words[idx] = w;
-  }
-
-  if (Math.random() < 0.35 && words.length < 16) {
-    const addCount = Math.random() < 0.5 ? 1 : 2;
-    for (let i = 0; i < addCount; i++) {
-      const idx = Math.floor(Math.random() * (words.length + 1));
-      const w = randomChatWord() ?? randomFrom(WORD_POOL);
-      words.splice(idx, 0, w);
-    }
-  }
-
-  if (Math.random() < 0.2 && words.length > 6) {
-    const idx = Math.floor(Math.random() * words.length);
-    words.splice(idx, 1);
-  }
-
-  if (Math.random() < 0.35 && words.length >= 6) {
-    for (let k = 0; k < 2; k++) {
-      const i = Math.floor(Math.random() * words.length);
-      const j = Math.floor(Math.random() * words.length);
-      [words[i], words[j]] = [words[j], words[i]];
-    }
-  }
-
-  return words;
-}
-
-function markovSentenceRaw() {
-  if (memory.length < 60) {
-    const fb = randomSentence();
-    rememberBotOutput(fb);
-    return fb;
-  }
-
-  const usable =
-    memory.length > RECENT_EXCLUDE ? memory.slice(0, memory.length - RECENT_EXCLUDE) : memory;
-
-  const model = buildMarkov3(usable);
-  const keys = Array.from(model.keys());
-  if (!keys.length) {
-    const fb = randomSentence();
-    rememberBotOutput(fb);
-    return fb;
-  }
-
-  for (let attempt = 0; attempt < 25; attempt++) {
-    const targetLen = Math.floor(Math.random() * 6) + 5;
-
-    const start = randomFrom(keys).split("|");
-    let out = [...start];
-
-    while (out.length < targetLen) {
-      const key = `${out[out.length - 3]}|${out[out.length - 2]}|${out[out.length - 1]}`;
-      const nexts = model.get(key);
-      if (!nexts || nexts.length === 0) break;
-      out.push(randomFrom(nexts));
-    }
-
-    out = injectNoiseFromChat(out);
-
-    let s = out.join(" ");
-    s = s.charAt(0).toUpperCase() + s.slice(1);
-    s += Math.random() < 0.2 ? "..." : ".";
-
-    if (!tooSimilar(s)) {
-      rememberBotOutput(s);
-      return s;
-    }
-  }
-
-  const fb = randomSentence();
-  rememberBotOutput(fb);
-  return fb;
-}
-
-function generateSafeSentence() {
-  for (let tries = 0; tries < 80; tries++) {
-    const s = markovSentenceRaw();
-    if (!s) continue;
-    if (containsReligiousAbuse(s)) continue;
-    return s;
-  }
-  const fb = randomSentence();
-  return containsReligiousAbuse(fb) ? "..." : fb;
-}
-
-/* =========================
-   SEED (son X gün, max N) + progress + heartbeat + throttle + ratelimit
-========================= */
 async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-
   const collected = [];
   let beforeId = undefined;
 
@@ -599,17 +428,10 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
     const now = Date.now();
     if (!force && now - lastLogAt < 5000) return;
     lastLogAt = now;
-
     const elapsedMs = now - startedAt;
     const elapsedSec = Math.max(1, Math.floor(elapsedMs / 1000));
     const rate = Math.round(collected.length / elapsedSec);
-
-    console.log(
-      `Seed progress: ${collected.length}/${maxMessages} msgs | fetch=${seedState.fetchCount} | ${formatDuration(
-        elapsedMs
-      )} | ~${rate} msg/sn`
-    );
-
+    console.log(`Seed progress: ${collected.length}/${maxMessages} | fetch=${seedState.fetchCount} | ${formatDuration(elapsedMs)} | ~${rate} msg/sn`);
     seedState.collected = collected.length;
     seedState.lastUpdateAt = now;
   };
@@ -617,7 +439,6 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   console.log(`Seed başladı: son ${days} gün, max ${maxMessages} mesaj (#${channel.name})`);
 
   while (collected.length < maxMessages) {
-    // event loop'a nefes ver
     await new Promise((r) => setImmediate(r));
 
     const batchSize = Math.min(100, maxMessages - collected.length);
@@ -628,73 +449,44 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
     let msgs;
     try {
-      // Discord fetch bazen network yüzünden takılı kalıyor gibi görünebilir.
-      // O yüzden "soft timeout": 20sn sonra hata gibi yakalayıp retry yapacağız.
       msgs = await Promise.race([
         channel.messages.fetch(opts),
-        (async () => {
-          await sleep(20000);
-          throw new Error("SEED_FETCH_TIMEOUT_20S");
-        })(),
+        (async () => { await sleep(20000); throw new Error("SEED_FETCH_TIMEOUT_20S"); })(),
       ]);
     } catch (e) {
-      // rate limit yakalama (discord.js farklı yerlere koyabiliyor)
-      const retryAfter =
-        e?.data?.retry_after ??
-        e?.retry_after ??
-        e?.rawError?.retry_after ??
-        e?.response?.data?.retry_after ??
-        null;
-
+      const retryAfter = e?.data?.retry_after ?? e?.retry_after ?? e?.rawError?.retry_after ?? null;
       if (retryAfter) {
         const waitMs = Math.ceil(Number(retryAfter) * 1000) + 750;
-        console.log(`[SEED] RATE LIMIT: ${retryAfter}s -> ${waitMs}ms bekliyorum...`);
+        console.log(`[SEED] RATE LIMIT: ${retryAfter}s -> bekliyorum...`);
         await sleep(waitMs);
         continue;
       }
-
-      // timeout ise biraz bekle retry
       if ((e?.message || "").includes("SEED_FETCH_TIMEOUT_20S")) {
-        console.log("[SEED] fetch 20sn içinde dönmedi, 3sn bekleyip tekrar deniyorum...");
+        console.log("[SEED] timeout, retry...");
         await sleep(3000);
         continue;
       }
-
       seedState.error = e?.message || String(e);
       seedState.running = false;
       seedState.done = false;
-
-      console.error("[SEED] FETCH ERROR:", {
-        name: e?.name,
-        code: e?.code,
-        message: e?.message,
-        status: e?.status,
-      });
+      console.error("[SEED] FETCH ERROR:", e?.name, e?.message);
       return;
     }
 
     seedState.fetchCount++;
     beat("after-fetch", `size=${msgs?.size ?? 0}`);
 
-    if (!msgs || msgs.size === 0) {
-      console.log("Seed: fetch boş döndü, duruyor.");
-      break;
-    }
+    if (!msgs || msgs.size === 0) break;
 
     const arr = Array.from(msgs.values()).reverse();
     let reachedCutoff = false;
 
     for (const m of arr) {
-      if (m.createdTimestamp < cutoff) {
-        reachedCutoff = true;
-        break;
-      }
+      if (m.createdTimestamp < cutoff) { reachedCutoff = true; break; }
       if (m.author.bot) continue;
-
       const t = (m.content || "").trim();
       if (!t) continue;
       if (containsReligiousAbuse(t)) continue;
-
       collected.push(t);
       if (collected.length >= maxMessages) break;
     }
@@ -702,27 +494,20 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
     if (seedState.fetchCount % 10 === 0) logProgress(true);
     else logProgress(false);
 
-    if (reachedCutoff) {
-      console.log(`Seed: cutoff tarihine ulaşıldı (${days} gün sınırı).`);
-      break;
-    }
+    if (reachedCutoff) break;
 
     beforeId = msgs.last().id;
-
-    // throttle (rate-limit'i çok azaltır)
     await sleep(350);
   }
 
   memory.length = 0;
   memory.push(...collected);
-
   while (memory.length > MAX_MEMORY_MESSAGES) memory.shift();
 
   memorySet.clear();
   for (const t of memory) memorySet.add(normalizeText(t));
 
   logProgress(true);
-
   seedState.running = false;
   seedState.done = true;
   seedState.error = null;
@@ -738,25 +523,19 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages, // DM mesajlarını almak için eklendi
+    GatewayIntentBits.DirectMessages,
   ],
 });
 
-// discord.js v15 için (ready -> clientReady)
 async function onClientReady() {
   console.log(`Bot aktif: ${client.user.tag}`);
+  if (!GEMINI_API_KEY) {
+    console.warn("[GEMINI] UYARI: GEMINI_API_KEY tanımlı değil! Fallback kullanılacak.");
+  }
 
   try {
     const ch = await client.channels.fetch(SEED_CHANNEL_ID);
-    if (!ch) {
-      console.log("Seed: Kanal bulunamadı (ID yanlış olabilir).");
-      return;
-    }
-    if (!ch.isTextBased()) {
-      console.log("Seed: Kanal text değil.");
-      return;
-    }
-
+    if (!ch || !ch.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
     console.log(`Seed: Kanal bulundu -> #${ch.name}`);
     await seedByDays(ch, SEED_DAYS, SEED_MAX);
   } catch (e) {
@@ -764,85 +543,51 @@ async function onClientReady() {
   }
 }
 
-// Her iki event'e de bağla (v14/v15 farkı)
 client.once("ready", onClientReady);
 client.once("clientReady", onClientReady);
 
 /* =========================
-   HTTP SERVER (Koyeb healthcheck + cmd)
+   HTTP SERVER
 ========================= */
-http
-  .createServer(async (req, res) => {
-    try {
-      const u = new URL(req.url, `http://${req.headers.host}`);
-      const path = u.pathname;
+http.createServer(async (req, res) => {
+  try {
+    const u = new URL(req.url, `http://${req.headers.host}`);
+    const path = u.pathname;
 
-      if (path === "/") {
-        res.writeHead(200, { "Content-Type": "text/plain" });
-        return res.end("OK");
+    if (path === "/") { res.writeHead(200); return res.end("OK"); }
+
+    if (path === "/cmd") {
+      const key = u.searchParams.get("key") || "";
+      if (!CMD_KEY || key !== CMD_KEY) { res.writeHead(401); return res.end("unauthorized"); }
+
+      const action = (u.searchParams.get("action") || "").toLowerCase();
+
+      if (action === "reaction_off") { reactionsEnabled = false; res.writeHead(200); return res.end("ok"); }
+      if (action === "reaction_on")  { reactionsEnabled = true;  res.writeHead(200); return res.end("ok"); }
+
+      if (action === "say") {
+        const text = u.searchParams.get("text") || "";
+        if (!text.trim()) { res.writeHead(400); return res.end("missing text"); }
+        if (!client?.isReady?.()) { res.writeHead(503); return res.end("not ready"); }
+        const ch = await client.channels.fetch(SEED_CHANNEL_ID);
+        if (!ch?.isTextBased()) { res.writeHead(404); return res.end("no channel"); }
+        await ch.send(text);
+        res.writeHead(200); return res.end("sent");
       }
 
-      if (path === "/cmd") {
-        const key = u.searchParams.get("key") || "";
-        if (!CMD_KEY || key !== CMD_KEY) {
-          res.writeHead(401, { "Content-Type": "text/plain" });
-          return res.end("unauthorized");
-        }
-
-        const action = (u.searchParams.get("action") || "").toLowerCase();
-
-        if (action === "reaction_off") {
-          reactionsEnabled = false;
-          res.writeHead(200, { "Content-Type": "text/plain" });
-          return res.end("sent");
-        }
-
-        if (action === "reaction_on") {
-          reactionsEnabled = true;
-          res.writeHead(200, { "Content-Type": "text/plain" });
-          return res.end("sent");
-        }
-
-        if (action === "say") {
-          const text = u.searchParams.get("text") || "";
-          if (!text.trim()) {
-            res.writeHead(400, { "Content-Type": "text/plain" });
-            return res.end("missing text");
-          }
-
-          if (!client?.isReady?.()) {
-            res.writeHead(503, { "Content-Type": "text/plain" });
-            return res.end("discord not ready");
-          }
-
-          const ch = await client.channels.fetch(SEED_CHANNEL_ID);
-          if (!ch || !ch.isTextBased()) {
-            res.writeHead(404, { "Content-Type": "text/plain" });
-            return res.end("channel not found");
-          }
-
-          await ch.send(text);
-          res.writeHead(200, { "Content-Type": "text/plain" });
-          return res.end("sent");
-        }
-
-        if (action === "seed_status") {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify(seedState, null, 2));
-        }
-
-        res.writeHead(400, { "Content-Type": "text/plain" });
-        return res.end("unknown action");
+      if (action === "seed_status") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(seedState, null, 2));
       }
 
-      res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("not found");
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "text/plain" });
-      res.end("server error");
+      res.writeHead(400); return res.end("unknown action");
     }
-  })
-  .listen(PORT, () => console.log(`HTTP server listening on ${PORT}`));
+
+    res.writeHead(404); res.end("not found");
+  } catch (e) {
+    res.writeHead(500); res.end("error");
+  }
+}).listen(PORT, () => console.log(`HTTP server on ${PORT}`));
 
 /* =========================
    MESSAGE HANDLER
@@ -853,18 +598,12 @@ client.on("messageCreate", async (message) => {
 
     const content = (message.content || "").trim();
 
-    // === DM'den admin mesajlarını hedef kanala yönlendir ===
-    // (Sunucu dışı = DM, sadece admin)
+    // === DM → admin mesajını kanala yönlendir ===
     if (message.guild === null && message.author.id === ADMIN_USER_ID) {
       console.log(`DM from admin: ${content}`);
       const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
-      if (targetChannel && targetChannel.isTextBased()) {
-        // İsterseniz ek bir önek ekleyebilirsiniz: `📨 ${content}`
-        await targetChannel.send(content);
-      } else {
-        console.log("Hedef kanal bulunamadı veya text değil.");
-      }
-      return; // Mesajı tüket, başka işlem yapma
+      if (targetChannel?.isTextBased()) await targetChannel.send(content);
+      return;
     }
 
     const lower = content.toLowerCase();
@@ -872,38 +611,19 @@ client.on("messageCreate", async (message) => {
     // === *gökhan (Roblox status) ===
     if (lower === "*gökhan" || lower === "*gokhan") {
       const status = await fetchRobloxStatus();
+      if (!status) { await message.reply("Roblox durumu çekemedim."); return; }
 
-      if (!status) {
-        await message.reply("Roblox durumu çekemedim.");
-        return;
-      }
-
-      if (status.presenceType === 0) {
-        await message.reply("offline.");
-        return;
-      }
-
-      if (status.presenceType === 3) {
-        await message.reply("Gökhan Studio'da nabıyon aq.");
-        return;
-      }
+      if (status.presenceType === 0) { await message.reply("offline."); return; }
+      if (status.presenceType === 3) { await message.reply("Gökhan Studio'da nabıyon aq."); return; }
 
       if (status.presenceType === 2) {
-        // Roblox bazen hiçbir bilgi vermiyor (placeId=null lastLocation='' universeId=null)
         let gameText = status.gameName;
-
         if (!gameText) {
-          if (!status.placeId && !status.universeId && !status.lastLocation) {
-            gameText = "Roblox oyun bilgisini göndermiyor (placeId/universeId yok).";
-          } else {
-            gameText =
-              status.lastLocation ||
-              (status.placeId ? `placeId=${status.placeId}` : null) ||
-              (status.universeId ? `universeId=${status.universeId}` : null) ||
-              "Bilinmiyor";
-          }
+          gameText = status.lastLocation ||
+            (status.placeId ? `placeId: ${status.placeId}` : null) ||
+            (status.universeId ? `universeId: ${status.universeId}` : null) ||
+            "Roblox oyun bilgisi yok (privacy kapalı olabilir)";
         }
-
         await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${gameText}`);
         return;
       }
@@ -915,66 +635,45 @@ client.on("messageCreate", async (message) => {
     // === *gökhanraw (admin debug) ===
     if ((lower === "*gökhanraw" || lower === "*gokhanraw") && message.author.id === ADMIN_USER_ID) {
       const status = await fetchRobloxStatus();
-      await message.reply("Konsola raw bastım.");
-      console.log("ROBLOX RAW:", status?.raw);
+      await message.reply("```json\n" + JSON.stringify(status?.raw ?? null, null, 2).slice(0, 1800) + "\n```");
       return;
     }
 
     // === ADMIN KOMUTLARI ===
     if (message.author.id === ADMIN_USER_ID) {
-      if (lower === "*reaction off") {
-        reactionsEnabled = false;
-        await message.reply("⛔ Reaction kapalı");
-        return;
-      }
-      if (lower === "*reaction on") {
-        reactionsEnabled = true;
-        await message.reply("✅ Reaction açık");
-        return;
-      }
-      if (lower === "*reaction status") {
-        await message.reply(reactionsEnabled ? "✅ AÇIK" : "⛔ KAPALI");
-        return;
-      }
+      if (lower === "*reaction off") { reactionsEnabled = false; await message.reply("⛔ Reaction kapalı"); return; }
+      if (lower === "*reaction on")  { reactionsEnabled = true;  await message.reply("✅ Reaction açık");  return; }
+      if (lower === "*reaction status") { await message.reply(reactionsEnabled ? "✅ AÇIK" : "⛔ KAPALI"); return; }
 
       if (lower === "*seed status") {
-        if (!seedState.startedAt) {
-          await message.reply("Seed daha başlamadı.");
-          return;
-        }
+        if (!seedState.startedAt) { await message.reply("Seed başlamadı."); return; }
+        const elapsed = Date.now() - seedState.startedAt;
+        const rate = Math.round(seedState.collected / Math.max(1, elapsed / 1000));
+        const st = seedState.running ? "⏳ ÇALIŞIYOR" : seedState.done ? "✅ TAMAMLANDI" : seedState.error ? "❌ HATA" : "⏸️ DURDU";
+        await message.reply([
+          `Seed: ${st}`,
+          `Kanal: #${seedState.channelName ?? "?"}`,
+          `Toplandı: ${seedState.collected}/${seedState.max}`,
+          `Fetch: ${seedState.fetchCount}`,
+          `Süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
+          seedState.error ? `Hata: ${seedState.error}` : null,
+        ].filter(Boolean).join("\n"));
+        return;
+      }
 
-        const now = Date.now();
-        const elapsed = now - seedState.startedAt;
-        const st =
-          seedState.running ? "⏳ ÇALIŞIYOR"
-          : seedState.done ? "✅ TAMAMLANDI"
-          : seedState.error ? "❌ HATA"
-          : "⏸️ DURDU";
-
-        const rate = Math.round(seedState.collected / Math.max(1, Math.floor(elapsed / 1000)));
-
-        await message.reply(
-          [
-            `Seed durumu: ${st}`,
-            `Kanal: #${seedState.channelName ?? "?"}`,
-            `Toplandı: ${seedState.collected}/${seedState.max}`,
-            `Fetch: ${seedState.fetchCount}`,
-            `Süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
-            seedState.error ? `Hata: ${seedState.error}` : null,
-          ].filter(Boolean).join("\n")
-        );
+      // Gemini test komutu
+      if (lower === "*gemini test") {
+        const out = await askGemini("Merhaba, nasılsın?", false);
+        await message.reply(out ? `✅ Gemini: ${out}` : "❌ Gemini yanıt vermedi (key kontrol et)");
         return;
       }
     }
 
-    // === HAFIZA CANLI GÜNCELLEME (SADECE SEED KANALI) ===
+    // === HAFIZA GÜNCELLEME (seed kanalı) ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
       if (!containsReligiousAbuse(content)) {
-        const norm = normalizeText(content);
-
         memory.push(content);
-        memorySet.add(norm);
-
+        memorySet.add(normalizeText(content));
         if (memory.length > MAX_MEMORY_MESSAGES) {
           const removed = memory.shift();
           memorySet.delete(normalizeText(removed));
@@ -982,44 +681,40 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    // === @MENTION CEVAP (ÖNCE SEÇİM SORUSU, SONRA SMART REPLY) ===
+    // === @MENTION CEVAP ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-      // Önce basit seçim sorusu kontrolü (mention'lar temizlenmiş halde)
+      // Seçim sorusu var mı?
       const choiceAnswer = handleSimpleChoiceQuestion(content);
-      if (choiceAnswer) {
-        await message.reply(choiceAnswer);
-        return;
-      }
+      if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
-      // Yoksa eski smart reply veya markov
-      const smart = smartReplyFor(content);
-      const out = smart || generateSafeSentence();
+      // Gemini ile cevapla
+      const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
+      const out = await askGemini(cleanContent || "ne düşünüyorsun", false) || randomSentence();
       await message.reply(out);
       return;
     }
 
-    // === BOT MESAJINA REPLY (ÖNCE SEÇİM SORUSU) ===
+    // === BOT MESAJINA REPLY ===
     if (
       message.reference &&
       message.mentions.repliedUser?.id === client.user.id &&
       Math.random() < REPLY_RESPONSE_CHANCE
     ) {
       const choiceAnswer = handleSimpleChoiceQuestion(content);
-      if (choiceAnswer) {
-        await message.reply(choiceAnswer);
-        return;
-      }
-      const out = generateSafeSentence();
+      if (choiceAnswer) { await message.reply(choiceAnswer); return; }
+
+      const out = await askGemini(content, false) || randomSentence();
       await message.reply(out);
       return;
     }
 
-    // === RASTGELE ARALIKLA MESAJ AT ===
+    // === RASTGELE MESAJ ===
     messageCounter++;
     if (messageCounter >= nextMessageTarget) {
       messageCounter = 0;
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
-      const out = generateSafeSentence();
+
+      const out = await askGemini(null, true) || randomSentence();
       await message.channel.send(out);
     }
 
@@ -1029,25 +724,24 @@ client.on("messageCreate", async (message) => {
 
     const has1 = message.reactions.cache.some((r) => r.emoji.name === EMOJI_1);
     const has2 = message.reactions.cache.some((r) => r.emoji.name === EMOJI_2);
-
     if (!has1) await message.react(EMOJI_1);
     if (!has2) await message.react(EMOJI_2);
+
   } catch (e) {
     console.error(e);
   }
 });
 
 /* =========================
-   LOGIN + DEBUG
+   LOGIN
 ========================= */
 console.log("Discord login başlıyor... token var mı?", Boolean(process.env.DISCORD_TOKEN));
 
-client.on("error", (e) => console.error("Discord client error:", e));
-client.on("shardError", (e) => console.error("Discord shard error:", e));
+client.on("error",   (e) => console.error("Discord error:",  e));
+client.on("shardError", (e) => console.error("Shard error:", e));
 process.on("unhandledRejection", (e) => console.error("UnhandledRejection:", e));
-process.on("uncaughtException", (e) => console.error("UncaughtException:", e));
+process.on("uncaughtException",  (e) => console.error("UncaughtException:",  e));
 
-client
-  .login(process.env.DISCORD_TOKEN)
-  .then(() => console.log("Discord login OK (promise resolved)"))
+client.login(process.env.DISCORD_TOKEN)
+  .then(() => console.log("Discord login OK"))
   .catch((e) => console.error("Discord login FAIL:", e));
