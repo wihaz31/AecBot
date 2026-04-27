@@ -167,25 +167,27 @@ function buildContextSamples(n = 30) {
 async function askGemini(userMessage = null, isRandom = false) {
   if (!GEMINI_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(300);
+  const contextSamples = buildContextSamples(40);
 
-  // System talimatı: sunucunun tonunu öğret
-  const systemInstruction = `Sen bir Discord sunucusunda konuşan bir Türk gençsin. 
-Sunucunun genel konuşma tarzını benimsiyorsun: kısa, samimi, bazen argo, internet slang kullanıyorsun.
-Emoji kullanabilirsin ama abartma. Çok uzun cevaplar verme (1-3 cümle yeterli).
-Dini hakaretler veya ırk ayrımcılığı içeren hiçbir şey söyleme.
-Markdown kullanma (bold, italik, kod bloğu yok).
-Aşağıda sunucudan örnek mesajlar var, bu tona yakın konuş:
+  const systemInstruction = `Aşağıdaki örnek mesajlar bir Discord sunucusundan alınmış gerçek konuşmalar. Sen bu sunucunun bir üyesisin, başka bir şey değilsin.
 
---- ÖRNEK MESAJLAR ---
-${contextSamples || "(henüz yok)"}
---- /ÖRNEK MESAJLAR ---`;
+KURALLAR (hiçbirini ihlal etme):
+- Sadece bu örneklerdeki gibi konuş.
+- Kesinlikle emoji kullanma. Tek bir tane bile yazma.
+- Markdown kullanma. Yıldız, backtick, alt çizgi gibi karakterler yazma.
+- Maksimum 1-2 cümle. Daha fazla yazma.
+- Asistan gibi davranma. "Tabii", "Elbette", "Yardımcı olabilirim" yazma.
+- Dini hakaretler ve ırkçılık yazma.
+- Soru sorma.
+
+ÖRNEK MESAJLAR:
+${contextSamples || "(yok)"}`;
 
   let prompt;
   if (isRandom) {
-    prompt = "Sunucuya kısa, random bir şey yaz. Kendi kendine bir şey söyle, soru sorma.";
+    prompt = "Sunucuya bir şey yaz.";
   } else {
-    prompt = userMessage || "Merhaba";
+    prompt = userMessage || "naber";
   }
 
   const body = {
@@ -228,7 +230,17 @@ ${contextSamples || "(henüz yok)"}
     // Dini hakaret filtrele
     if (containsReligiousAbuse(text)) return null;
 
-    return text;
+    // Emoji ve markdown temizle
+    const cleaned = text
+      .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
+      .replace(/[\u{2600}-\u{27BF}]/gu, "")
+      .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
+      .replace(/\*+|`+|_{2,}/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    if (!cleaned) return null;
+    return cleaned;
   } catch (e) {
     console.error("[GEMINI] Error:", e?.name, e?.message?.slice(0, 100));
     return null;
@@ -598,17 +610,11 @@ client.on("messageCreate", async (message) => {
 
     const content = (message.content || "").trim();
 
-    // === DM → admin mesajını kanala yönlendir ===
-    if (message.guild === null && message.author.id === ADMIN_USER_ID) {
-      console.log(`DM from admin: ${content}`);
-      const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
-      if (targetChannel?.isTextBased()) await targetChannel.send(content);
-      return;
-    }
-
     const lower = content.toLowerCase();
+    const isDM = message.guild === null;
+    const isAdmin = message.author.id === ADMIN_USER_ID;
 
-    // === *gökhan (Roblox status) ===
+    // === *gökhan (Roblox status) — DM veya sunucudan çalışır ===
     if (lower === "*gökhan" || lower === "*gokhan") {
       const status = await fetchRobloxStatus();
       if (!status) { await message.reply("Roblox durumu çekemedim."); return; }
@@ -632,15 +638,15 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // === *gökhanraw (admin debug) ===
-    if ((lower === "*gökhanraw" || lower === "*gokhanraw") && message.author.id === ADMIN_USER_ID) {
+    // === *gökhanraw (admin debug) — DM veya sunucudan ===
+    if ((lower === "*gökhanraw" || lower === "*gokhanraw") && isAdmin) {
       const status = await fetchRobloxStatus();
       await message.reply("```json\n" + JSON.stringify(status?.raw ?? null, null, 2).slice(0, 1800) + "\n```");
       return;
     }
 
-    // === ADMIN KOMUTLARI ===
-    if (message.author.id === ADMIN_USER_ID) {
+    // === ADMIN KOMUTLARI — DM veya sunucudan çalışır ===
+    if (isAdmin) {
       if (lower === "*reaction off") { reactionsEnabled = false; await message.reply("⛔ Reaction kapalı"); return; }
       if (lower === "*reaction on")  { reactionsEnabled = true;  await message.reply("✅ Reaction açık");  return; }
       if (lower === "*reaction status") { await message.reply(reactionsEnabled ? "✅ AÇIK" : "⛔ KAPALI"); return; }
@@ -661,13 +667,38 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      // Gemini test komutu
       if (lower === "*gemini test") {
         const out = await askGemini("Merhaba, nasılsın?", false);
         await message.reply(out ? `✅ Gemini: ${out}` : "❌ Gemini yanıt vermedi (key kontrol et)");
         return;
       }
+
+      if (lower === "*yardim" || lower === "*help") {
+        await message.reply([
+          "**Admin Komutları:**",
+          "`*reaction on/off/status` — reaction aç/kapat",
+          "`*seed status` — seed durumu",
+          "`*gemini test` — Gemini bağlantısını test et",
+          "`*gökhan` — Roblox durumu",
+          "`*gökhanraw` — Roblox ham veri",
+          "`*yardim` — bu liste",
+          "",
+          "DM'den yazılan diğer mesajlar kanala yönlendirilir.",
+        ].join("\n"));
+        return;
+      }
+
+      // Komut değilse (* ile başlamıyorsa) → kanala yönlendir
+      if (isDM && !lower.startsWith("*")) {
+        console.log(`DM from admin: ${content}`);
+        const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
+        if (targetChannel?.isTextBased()) await targetChannel.send(content);
+        return;
+      }
     }
+
+    // Admin olmayan DM'leri yoksay
+    if (isDM) return;
 
     // === HAFIZA GÜNCELLEME (seed kanalı) ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
