@@ -40,7 +40,7 @@ const ROBLOX_USER_ID = "2575829815";
 
 // Gemini
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-1.5-flash";
 
 /* =========================
    SEED DURUMU
