@@ -167,7 +167,7 @@ function buildContextSamples(n = 30) {
 async function askGemini(userMessage = null, isRandom = false) {
   if (!GEMINI_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(40);
+  const contextSamples = buildContextSamples(300);
 
   // System talimatı: sunucunun tonunu öğret
   const systemInstruction = `Sen bir Discord sunucusunda konuşan bir Türk gençsin. 
