@@ -38,9 +38,9 @@ const CMD_KEY = process.env.CMD_KEY || "";
 // Roblox
 const ROBLOX_USER_ID = "2575829815";
 
-// Gemini
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+// Groq
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 /* =========================
    SEED DURUMU
@@ -146,30 +146,22 @@ function sleep(ms) {
 }
 
 /* =========================
-   GEMINI AI
+   GROQ AI
 ========================= */
 
-// Son N mesajı örnek olarak context'e ekle
 function buildContextSamples(n = 30) {
   if (memory.length === 0) return "";
   const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
   if (usable.length === 0) return "";
-  const sample = usable.slice(-n);
-  return sample.join("\n");
+  return usable.slice(-n).join("\n");
 }
 
-/**
- * Gemini'ye istek at.
- * @param {string} userMessage  - kullanıcının mesajı (mention/reply için)
- * @param {boolean} isRandom    - true ise rastgele mesaj üret (mention yok)
- * @returns {Promise<string|null>}
- */
-async function askGemini(userMessage = null, isRandom = false) {
-  if (!GEMINI_API_KEY) return null;
+async function askAI(userMessage = null, isRandom = false) {
+  if (!GROQ_API_KEY) return null;
 
   const contextSamples = buildContextSamples(40);
 
-  const systemInstruction = `Aşağıdaki örnek mesajlar bir Discord sunucusundan alınmış gerçek konuşmalar. Sen bu sunucunun bir üyesisin, başka bir şey değilsin.
+  const systemPrompt = `Aşağıdaki örnek mesajlar bir Discord sunucusundan alınmış gerçek konuşmalar. Sen bu sunucunun bir üyesisin, başka bir şey değilsin.
 
 KURALLAR (hiçbirini ihlal etme):
 - Sadece bu örneklerdeki gibi konuş.
@@ -183,38 +175,31 @@ KURALLAR (hiçbirini ihlal etme):
 ÖRNEK MESAJLAR:
 ${contextSamples || "(yok)"}`;
 
-  let prompt;
-  if (isRandom) {
-    prompt = "Sunucuya bir şey yaz.";
-  } else {
-    prompt = userMessage || "naber";
-  }
+  const userPrompt = isRandom ? "Sunucuya bir şey yaz." : (userMessage || "naber");
 
   const body = {
-    system_instruction: { parts: [{ text: systemInstruction }] },
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      maxOutputTokens: 120,
-      temperature: 0.95,
-      topP: 0.9,
-    },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+    model: GROQ_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
     ],
+    max_tokens: 120,
+    temperature: 0.95,
+    top_p: 0.9,
   };
 
-  const RETRY_DELAYS = [2000, 4000]; // 503/429 için 2 retry
+  const RETRY_DELAYS = [2000, 4000];
 
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     try {
       const res = await fetchWithTimeout(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+        "https://api.groq.com/openai/v1/chat/completions",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GROQ_API_KEY}`,
+          },
           body: JSON.stringify(body),
         },
         15000
@@ -222,23 +207,21 @@ ${contextSamples || "(yok)"}`;
 
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        // 503 veya 429 ise retry
         if ((res.status === 503 || res.status === 429) && attempt < RETRY_DELAYS.length) {
-          console.warn(`[GEMINI] ${res.status} - ${RETRY_DELAYS[attempt]}ms sonra retry (${attempt + 1}/${RETRY_DELAYS.length})`);
+          console.warn(`[GROQ] ${res.status} - retry ${attempt + 1}`);
           await sleep(RETRY_DELAYS[attempt]);
           continue;
         }
-        console.error(`[GEMINI] HTTP ${res.status}:`, errText.slice(0, 200));
+        console.error(`[GROQ] HTTP ${res.status}:`, errText.slice(0, 200));
         return null;
       }
 
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const text = data?.choices?.[0]?.message?.content?.trim();
       if (!text) return null;
 
       if (containsReligiousAbuse(text)) return null;
 
-      // Emoji ve markdown temizle
       const cleaned = text
         .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
         .replace(/[\u{2600}-\u{27BF}]/gu, "")
@@ -248,15 +231,25 @@ ${contextSamples || "(yok)"}`;
         .trim();
 
       if (!cleaned) return null;
+
+      const refusalPatterns = [
+        "katılmıyorum", "cevap veremem", "cevap vermem", "uygun değil",
+        "mümkün değil", "yapamam", "söyleyemem", "etik değil",
+        "yardımcı olamam", "üzgünüm",
+        "i cannot", "i can't", "i'm unable", "i won't", "i will not",
+        "as an ai", "as a language"
+      ];
+      if (refusalPatterns.some(p => cleaned.toLowerCase().includes(p))) return null;
+
       return cleaned;
 
     } catch (e) {
       if (attempt < RETRY_DELAYS.length) {
-        console.warn(`[GEMINI] Hata, retry: ${e?.name}`);
+        console.warn(`[GROQ] Hata, retry: ${e?.name}`);
         await sleep(RETRY_DELAYS[attempt]);
         continue;
       }
-      console.error("[GEMINI] Error:", e?.name, e?.message?.slice(0, 100));
+      console.error("[GROQ] Error:", e?.name, e?.message?.slice(0, 100));
       return null;
     }
   }
@@ -558,8 +551,8 @@ const client = new Client({
 
 async function onClientReady() {
   console.log(`Bot aktif: ${client.user.tag}`);
-  if (!GEMINI_API_KEY) {
-    console.warn("[GEMINI] UYARI: GEMINI_API_KEY tanımlı değil! Fallback kullanılacak.");
+  if (!GROQ_API_KEY) {
+    console.warn("[GROQ] UYARI: GROQ_API_KEY tanımlı değil! Fallback kullanılacak.");
   }
 
   try {
@@ -684,9 +677,9 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      if (lower === "*gemini test") {
-        const out = await askGemini("Merhaba, nasılsın?", false);
-        await message.reply(out ? `✅ Gemini: ${out}` : "❌ Gemini yanıt vermedi (key kontrol et)");
+      if (lower === "*ai test") {
+        const out = await askAI("Merhaba, nasılsın?", false);
+        await message.reply(out ? `✅ Groq: ${out}` : "❌ Groq yanıt vermedi (key kontrol et)");
         return;
       }
 
@@ -695,7 +688,7 @@ client.on("messageCreate", async (message) => {
           "**Admin Komutları:**",
           "`*reaction on/off/status` — reaction aç/kapat",
           "`*seed status` — seed durumu",
-          "`*gemini test` — Gemini bağlantısını test et",
+          "`*ai test` — Groq bağlantısını test et",
           "`*gökhan` — Roblox durumu",
           "`*gökhanraw` — Roblox ham veri",
           "`*yardim` — bu liste",
@@ -737,7 +730,7 @@ client.on("messageCreate", async (message) => {
 
       // Gemini ile cevapla
       const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
-      const out = await askGemini(cleanContent || "ne düşünüyorsun", false) || randomSentence();
+      const out = await askAI(cleanContent || "ne düşünüyorsun", false) || randomSentence();
       await message.reply(out);
       return;
     }
@@ -751,7 +744,7 @@ client.on("messageCreate", async (message) => {
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
-      const out = await askGemini(content, false) || randomSentence();
+      const out = await askAI(content, false) || randomSentence();
       await message.reply(out);
       return;
     }
@@ -762,7 +755,7 @@ client.on("messageCreate", async (message) => {
       messageCounter = 0;
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
 
-      const out = await askGemini(null, true) || randomSentence();
+      const out = await askAI(null, true) || randomSentence();
       await message.channel.send(out);
     }
 
