@@ -199,52 +199,69 @@ ${contextSamples || "(yok)"}`;
       topP: 0.9,
     },
     safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
     ],
   };
 
-  try {
-    const res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      15000
-    );
+  const RETRY_DELAYS = [2000, 4000]; // 503/429 için 2 retry
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      console.error(`[GEMINI] HTTP ${res.status}:`, errText.slice(0, 200));
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        15000
+      );
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        // 503 veya 429 ise retry
+        if ((res.status === 503 || res.status === 429) && attempt < RETRY_DELAYS.length) {
+          console.warn(`[GEMINI] ${res.status} - ${RETRY_DELAYS[attempt]}ms sonra retry (${attempt + 1}/${RETRY_DELAYS.length})`);
+          await sleep(RETRY_DELAYS[attempt]);
+          continue;
+        }
+        console.error(`[GEMINI] HTTP ${res.status}:`, errText.slice(0, 200));
+        return null;
+      }
+
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!text) return null;
+
+      if (containsReligiousAbuse(text)) return null;
+
+      // Emoji ve markdown temizle
+      const cleaned = text
+        .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
+        .replace(/[\u{2600}-\u{27BF}]/gu, "")
+        .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
+        .replace(/\*+|`+|_{2,}/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      if (!cleaned) return null;
+      return cleaned;
+
+    } catch (e) {
+      if (attempt < RETRY_DELAYS.length) {
+        console.warn(`[GEMINI] Hata, retry: ${e?.name}`);
+        await sleep(RETRY_DELAYS[attempt]);
+        continue;
+      }
+      console.error("[GEMINI] Error:", e?.name, e?.message?.slice(0, 100));
       return null;
     }
-
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text) return null;
-
-    // Dini hakaret filtrele
-    if (containsReligiousAbuse(text)) return null;
-
-    // Emoji ve markdown temizle
-    const cleaned = text
-      .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
-      .replace(/[\u{2600}-\u{27BF}]/gu, "")
-      .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
-      .replace(/\*+|`+|_{2,}/g, "")
-      .replace(/\s{2,}/g, " ")
-      .trim();
-
-    if (!cleaned) return null;
-    return cleaned;
-  } catch (e) {
-    console.error("[GEMINI] Error:", e?.name, e?.message?.slice(0, 100));
-    return null;
   }
+
+  return null;
 }
 
 /* =========================
