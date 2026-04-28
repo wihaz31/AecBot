@@ -78,6 +78,26 @@ const memorySet = new Set();
 const botRecentSet = new Set();
 const BOT_RECENT_LIMIT = 200;
 
+// Botun kendi cevabını hem memory'ye hem context'e ekle
+function rememberBotOutput(text) {
+  if (!text || text.length < 3) return;
+
+  // Ana hafızaya ekle — bağlantı kurabilsin diye
+  memory.push(text);
+  memorySet.add(normalizeText(text));
+  if (memory.length > MAX_MEMORY_MESSAGES) {
+    const removed = memory.shift();
+    memorySet.delete(normalizeText(removed));
+  }
+
+  // Tekrar filtresi için ayrı set
+  botRecentSet.add(normalizeText(text));
+  if (botRecentSet.size > BOT_RECENT_LIMIT) {
+    const first = botRecentSet.values().next().value;
+    botRecentSet.delete(first);
+  }
+}
+
 /* =========================
    FALLBACK WORD POOL
 ========================= */
@@ -232,12 +252,11 @@ ${contextSamples || "(yok)"}`;
 
       if (!cleaned) return null;
 
+      // Sadece açık reddetme kalıpları — çok geniş tutma
       const refusalPatterns = [
-        "katılmıyorum", "cevap veremem", "cevap vermem", "uygun değil",
-        "mümkün değil", "yapamam", "söyleyemem", "etik değil",
-        "yardımcı olamam", "üzgünüm",
+        "cevap veremem", "cevap vermem",
         "i cannot", "i can't", "i'm unable", "i won't", "i will not",
-        "as an ai", "as a language"
+        "as an ai", "as a language model",
       ];
       if (refusalPatterns.some(p => cleaned.toLowerCase().includes(p))) return null;
 
@@ -731,6 +750,7 @@ client.on("messageCreate", async (message) => {
       // Gemini ile cevapla
       const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
       const out = await askAI(cleanContent || "ne düşünüyorsun", false) || randomSentence();
+      rememberBotOutput(out);
       await message.reply(out);
       return;
     }
@@ -745,6 +765,7 @@ client.on("messageCreate", async (message) => {
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
       const out = await askAI(content, false) || randomSentence();
+      rememberBotOutput(out);
       await message.reply(out);
       return;
     }
@@ -756,6 +777,7 @@ client.on("messageCreate", async (message) => {
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
 
       const out = await askAI(null, true) || randomSentence();
+      rememberBotOutput(out);
       await message.channel.send(out);
     }
 
