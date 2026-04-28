@@ -169,7 +169,7 @@ function sleep(ms) {
    GROQ AI
 ========================= */
 
-function buildContextSamples(n = 30) {
+function buildContextSamples(n = 300) {
   if (memory.length === 0) return "";
   const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
   if (usable.length === 0) return "";
@@ -179,7 +179,7 @@ function buildContextSamples(n = 30) {
 async function askAI(userMessage = null, isRandom = false) {
   if (!GROQ_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(40);
+  const contextSamples = buildContextSamples(300);
 
   const systemPrompt = `Aşağıdaki örnek mesajlar bir Discord sunucusundan alınmış gerçek konuşmalar. Sen bu sunucunun bir üyesisin, başka bir şey değilsin.
 
@@ -255,6 +255,7 @@ ${contextSamples || "(yok)"}`;
       // Sadece açık reddetme kalıpları — çok geniş tutma
       const refusalPatterns = [
         "cevap veremem", "cevap vermem",
+        "bilgi bulunmuyor", "bilgi yok", "bilmiyorum",
         "i cannot", "i can't", "i'm unable", "i won't", "i will not",
         "as an ai", "as a language model",
       ];
