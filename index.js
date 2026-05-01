@@ -166,6 +166,26 @@ function sleep(ms) {
 }
 
 /* =========================
+   KANAL GEÇMİŞİ (son N mesaj)
+========================= */
+async function fetchRecentHistory(channel, limit = 10) {
+  try {
+    const msgs = await channel.messages.fetch({ limit: limit + 1 });
+    return Array.from(msgs.values())
+      .reverse()
+      .slice(0, limit)
+      .map(m => ({
+        isBot: m.author.id === client.user?.id,
+        content: (m.content || "").replace(/<@!?\d+>/g, "").trim(),
+      }))
+      .filter(m => m.content.length > 0);
+  } catch (e) {
+    console.warn("[HISTORY] fetch hatası:", e?.message?.slice(0, 60));
+    return [];
+  }
+}
+
+/* =========================
    GROQ AI
 ========================= */
 
@@ -176,7 +196,7 @@ function buildContextSamples(n = 300) {
   return usable.slice(-n).join("\n");
 }
 
-async function askAI(userMessage = null, isRandom = false) {
+async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
   if (!GROQ_API_KEY) return null;
 
   const contextSamples = buildContextSamples(300);
@@ -197,10 +217,17 @@ ${contextSamples || "(yok)"}`;
 
   const userPrompt = isRandom ? "Sunucuya bir şey yaz." : (userMessage || "naber");
 
+  // Son mesajları user/assistant olarak sırala
+  const historyMessages = recentHistory.map(h => ({
+    role: h.isBot ? "assistant" : "user",
+    content: h.content,
+  }));
+
   const body = {
     model: GROQ_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
+      ...historyMessages,
       { role: "user", content: userPrompt },
     ],
     max_tokens: 120,
@@ -294,31 +321,6 @@ function randomSentence() {
 /* =========================
    BASIT SEÇIM SORUSU (Türkçe)
 ========================= */
-function handleSimpleChoiceQuestion(text) {
-  const cleanText = text.replace(/<@!?(\d+)>/g, "").trim();
-  if (!cleanText) return null;
-
-  const match = cleanText.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
-  if (match) {
-    return Math.random() < 0.5 ? match[1].trim() : match[3].trim();
-  }
-
-  const match2 = cleanText.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
-  if (match2) {
-    return Math.random() < 0.5 ? match2[1].trim() : match2[2].trim();
-  }
-
-  const match3 = cleanText.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
-  if (match3) {
-    return Math.random() < 0.5 ? match3[1].trim() : match3[2].trim();
-  }
-
-  if (cleanText.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
-    return Math.random() < 0.5 ? "evet" : "hayır";
-  }
-
-  return null;
-}
 
 /* =========================
    ROBLOX (cache + presence)
@@ -744,13 +746,9 @@ client.on("messageCreate", async (message) => {
 
     // === @MENTION CEVAP ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-      // Seçim sorusu var mı?
-      const choiceAnswer = handleSimpleChoiceQuestion(content);
-      if (choiceAnswer) { await message.reply(choiceAnswer); return; }
-
-      // Gemini ile cevapla
       const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
-      const out = await askAI(cleanContent || "ne düşünüyorsun", false) || randomSentence();
+      const recentHistory = await fetchRecentHistory(message.channel, 10);
+      const out = await askAI(cleanContent || "ne düşünüyorsun", false, recentHistory) || randomSentence();
       rememberBotOutput(out);
       await message.reply(out);
       return;
@@ -762,10 +760,8 @@ client.on("messageCreate", async (message) => {
       message.mentions.repliedUser?.id === client.user.id &&
       Math.random() < REPLY_RESPONSE_CHANCE
     ) {
-      const choiceAnswer = handleSimpleChoiceQuestion(content);
-      if (choiceAnswer) { await message.reply(choiceAnswer); return; }
-
-      const out = await askAI(content, false) || randomSentence();
+      const recentHistory = await fetchRecentHistory(message.channel, 10);
+      const out = await askAI(content, false, recentHistory) || randomSentence();
       rememberBotOutput(out);
       await message.reply(out);
       return;
