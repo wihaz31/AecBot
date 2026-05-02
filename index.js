@@ -176,6 +176,7 @@ async function fetchRecentHistory(channel, limit = 10) {
       .slice(0, limit)
       .map(m => ({
         isBot: m.author.id === client.user?.id,
+        username: m.author.username || "biri",
         content: (m.content || "").replace(/<@!?\d+>/g, "").trim(),
       }))
       .filter(m => m.content.length > 0);
@@ -201,27 +202,34 @@ async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
 
   const contextSamples = buildContextSamples(300);
 
-  const systemPrompt = `Aşağıdaki örnek mesajlar bir Discord sunucusundan alınmış gerçek konuşmalar. Sen bu sunucunun bir üyesisin, başka bir şey değilsin.
+  const systemPrompt = `Sen bir Türk Discord sunucusunun sıradan bir üyesisin. Arkadaşlarınla sohbet ediyorsun.
 
-KURALLAR (hiçbirini ihlal etme):
-- Sadece bu örneklerdeki gibi konuş.
-- Kesinlikle emoji kullanma. Tek bir tane bile yazma.
-- Markdown kullanma. Yıldız, backtick, alt çizgi gibi karakterler yazma.
-- Maksimum 1-2 cümle. Daha fazla yazma.
-- Asistan gibi davranma. "Tabii", "Elbette", "Yardımcı olabilirim" yazma.
-- Dini hakaretler ve ırkçılık yazma.
-- Soru sorma.
+ZORUNLU KURALLAR:
+- Emoji YAZMA. Hiç. Bir tane bile.
+- Yıldız, backtick, alt çizgi gibi markdown karakterleri YAZMA.
+- Maksimum 1 cümle yaz. Uzun cevap verme.
+- "Tabii", "Elbette", "Merhaba", "Yardımcı olabilirim" YAZMA.
+- Dini hakaret ve ırkçılık YAZMA.
+- Soru SORMA.
+- Konuyla alakasız şey YAZMA. Ne sorulduysa ona cevap ver.
+- Eğer mesaj anlamsız karakter dizisiyse (ASDFGH gibi) kısa ve alaycı bir şey söyle.
 
-ÖRNEK MESAJLAR:
+TON: Kısa, samimi, sokak dili, argo olabilir.
+
+ÖRNEK KONUŞMALAR (bu tonda yaz):
 ${contextSamples || "(yok)"}`;
 
-  const userPrompt = isRandom ? "Sunucuya bir şey yaz." : (userMessage || "naber");
+  const userPrompt = isRandom ? "Kanalda biri birşey yazdı, sen de kısa bir şey söyle." : (userMessage || "naber");
 
-  // Son mesajları user/assistant olarak sırala
-  const historyMessages = recentHistory.map(h => ({
-    role: h.isBot ? "assistant" : "user",
-    content: h.content,
-  }));
+  // Son mesajları sohbet geçmişi olarak tek user mesajı şeklinde gönder
+  // Groq'un kimin ne dediğini anlaması için isim ekle
+  const historyText = recentHistory
+    .map(h => `${h.isBot ? "Sen" : h.username}: ${h.content}`)
+    .join("\n");
+  const historyMessages = historyText
+    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}` },
+       { role: "assistant", content: "tamam" }]
+    : [];
 
   const body = {
     model: GROQ_MODEL,
