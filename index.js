@@ -219,7 +219,7 @@ TON: Kısa, samimi, sokak dili, argo olabilir.
 ÖRNEK KONUŞMALAR (bu tonda yaz):
 ${contextSamples || "(yok)"}`;
 
-  const userPrompt = isRandom ? "Kanalda biri birşey yazdı, sen de kısa bir şey söyle." : (userMessage || "naber");
+  const userPrompt = isRandom ? `Kanaldaki son mesaj: "${userMessage || "..."}" — sen de bu konuya ya da tamamen farklı bir şeye kısa bir yorum yap.` : (userMessage || "naber");
 
   // Son mesajları sohbet geçmişi olarak tek user mesajı şeklinde gönder
   // Groq'un kimin ne dediğini anlaması için isim ekle
@@ -781,7 +781,9 @@ client.on("messageCreate", async (message) => {
       messageCounter = 0;
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
 
-      const out = await askAI(null, true) || randomSentence();
+      const recentHistory = await fetchRecentHistory(message.channel, 10);
+      const lastMsg = content || null;
+      const out = await askAI(lastMsg, true, recentHistory) || randomSentence();
       rememberBotOutput(out);
       await message.channel.send(out);
     }
