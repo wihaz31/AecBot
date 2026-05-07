@@ -187,10 +187,62 @@ async function fetchRecentHistory(channel, limit = 10) {
 }
 
 /* =========================
+   SUNUCU KİŞİLİĞİ ANALİZİ
+========================= */
+let serverPersonality = ""; // Seed sonrası doldurulur
+
+async function analyzeServerPersonality() {
+  if (!GROQ_API_KEY || memory.length < 100) return;
+
+  // Rastgele 200 mesaj al — tüm dönemi temsil etsin
+  const sample = [];
+  for (let i = 0; i < 200; i++) {
+    sample.push(memory[Math.floor(Math.random() * memory.length)]);
+  }
+  const sampleText = sample.join("\n");
+
+  const prompt = `Aşağıdaki Discord konuşmalarını analiz et ve bu sunucunun konuşma tarzını 5-8 cümleyle özetle.
+Şunları belirt: sık kullanılan kelimeler/argo, konuşma tonu, sık geçen konular, mizah tarzı.
+Kısa ve net yaz, madde madde değil düz metin olarak.
+
+KONUŞMALAR:
+${sampleText}`;
+
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 200,
+          temperature: 0.3,
+        }),
+      },
+      20000
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content?.trim();
+    if (text) {
+      serverPersonality = text;
+      console.log("[PERSONALITY] Analiz tamamlandı:", text.slice(0, 100) + "...");
+    }
+  } catch (e) {
+    console.warn("[PERSONALITY] Analiz hatası:", e?.message?.slice(0, 60));
+  }
+}
+
+/* =========================
    GROQ AI
 ========================= */
 
-function buildContextSamples(n = 300) {
+function buildContextSamples(n = 1000) {
   if (memory.length === 0) return "";
   const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
   if (usable.length === 0) return "";
@@ -200,9 +252,10 @@ function buildContextSamples(n = 300) {
 async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
   if (!GROQ_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(300);
+  const contextSamples = buildContextSamples(1000);
 
-  const systemPrompt = `Sen bir Türk Discord sunucusunun sıradan bir üyesisin. Arkadaşlarınla sohbet ediyorsun.
+  const personalityNote = serverPersonality ? `\nSUNUCU KİŞİLİĞİ (bunu içselleştir):\n${serverPersonality}\n` : "";
+  const systemPrompt = `Sen bir Türk Discord sunucusunun sıradan bir üyesisin. Arkadaşlarınla sohbet ediyorsun.${personalityNote}
 
 ZORUNLU KURALLAR:
 - Emoji YAZMA. Hiç. Bir tane bile.
@@ -217,8 +270,11 @@ ZORUNLU KURALLAR:
 
 TON: Kısa, samimi, sokak dili. Küfür kullanabilirsin ama her cümlede değil, sadece gerektiğinde doğal hissettirdiğinde.
 
-ÖRNEK KONUŞMALAR (bu tonda yaz):
-${contextSamples || "(yok)"}`;
+Aşağıdaki gerçek konuşma geçmişini oku ve bu insanların tam konuşma tarzını, kelimelerini, tepkilerini taklit et. Uzun açıklama yapma, bu insanlar gibi kısa ve direkt konuş:
+
+--- KONUŞMA GEÇMİŞİ ---
+${contextSamples || "(yok)"}
+--- /KONUŞMA GEÇMİŞİ ---`;
 
   const userPrompt = isRandom ? `Kanaldaki konuşma bu. Sen de dahil ol — fikir belirt, dalga geç, eleştir, katıl veya tamamen farklı bir şey söyle. "Anladım", "yani", "demek ki" gibi konuyu özetleyen şeyler YAZMA. Direkt bir şey söyle.` : (userMessage || "naber");
 
@@ -566,6 +622,9 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   seedState.error = null;
 
   console.log(`Seed tamam ✅ Hafıza: ${memory.length} mesaj (#${channel.name})`);
+
+  // Seed bittikten sonra sunucu kişiliğini analiz et
+  await analyzeServerPersonality();
 }
 
 /* =========================
