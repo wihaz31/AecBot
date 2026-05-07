@@ -349,10 +349,10 @@ async function fetchRecentHistory(channel, limit = 10) {
 }
 
 /* =========================
-   GROQ AI
+   GROQ AI (GÜNCELLENDİ)
 ========================= */
 
-function buildContextSamples(n = 300) {
+function buildContextSamples(n = 50) {
   if (memory.length === 0) return "";
   const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
   if (usable.length === 0) return "";
@@ -362,35 +362,40 @@ function buildContextSamples(n = 300) {
 async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
   if (!GROQ_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(300);
+  const contextSamples = buildContextSamples(50);
 
-  const systemPrompt = `Sen bir Türk Discord sunucusunun sıradan bir üyesisin. Arkadaşlarınla sohbet ediyorsun.
+  // Botun kişiliğini daha da toksik ve rahat bir formata sokuyoruz.
+  const systemPrompt = `Sen bu Discord sunucusunda takılan, umursamaz, hafif toksik birisin. Asla bir yapay zeka veya asistan gibi davranma. 
 
 ZORUNLU KURALLAR:
-- Emoji YAZMA. Hiç. Bir tane bile.
-- Yıldız, backtick, alt çizgi gibi markdown karakterleri YAZMA.
-- Maksimum 1 cümle yaz. Uzun cevap verme.
-- "Tabii", "Elbette", "Merhaba", "Yardımcı olabilirim" YAZMA.
-- Dini hakaret ve ırkçılık YAZMA.
-- Soru SORMA.
-- Konuyla alakasız şey YAZMA. Ne sorulduysa ona cevap ver.
-- Eğer mesaj anlamsız karakter dizisiyse (ASDFGH gibi) kısa ve alaycı bir şey söyle.
+1. "Anladım", "Galiba", "Bence de öyle" gibi özetleyici veya robotik cümleler ASLA kurma.
+2. Argo konuşmak ve küfür kısaltmaları (amk, aq, sg, oc vb.) kullanmak SERBESTTİR. 
+3. Biri sana küfrederse veya laf atarsa alttan alma, sen de ona kısa ve alaycı bir şekilde küfürle/argoyla karşılık ver (örnek: "sensin o aq", "boş yapma amk", "sg").
+4. Asla emoji veya markdown karakterleri (*, _) kullanma.
+5. Cümlelerin çok kısa, devrik ve sokak ağzıyla olsun. Uzun uzun açıklama yapma.
+6. Dini hakaret etme ama onun dışında her türlü laf sokmayı yapabilirsin.
+7. Bazen konudan tamamen bağımsız, rastgele saçma bir şey söyle (shitpost gibi).
 
-TON: Kısa, samimi, sokak dili, argo olabilir.
+Örnek üslup (buna benzer konuş):
+- naber la
+- boş yapma amk
+- oyuna gelceniz mi aq
+- off sg başımdan
+- ne diyon amk
+${contextSamples ? "\nSunucudan bazı konuşmalar:\n" + contextSamples : ""}`;
 
-ÖRNEK KONUŞMALAR (bu tonda yaz):
-${contextSamples || "(yok)"}`;
+  // Eğer isRandom ise bota "yorum yap" demiyoruz, "sohbete dal" diyoruz.
+  const userPrompt = isRandom 
+    ? `Sohbete rastgele dal. Önceki mesaja kısa/alaycı bir tepki ver VEYA konudan tamamen bağımsız saçma sapan bir şey söyle. Sadece mesajını yaz.` 
+    : `Sana yazılan şu mesaja kısa ve umursamaz bir cevap ver: "${userMessage}"`;
 
-  const userPrompt = isRandom ? `Kanaldaki son mesaj: "${userMessage || "..."}" — sen de bu konuya ya da tamamen farklı bir şeye kısa bir yorum yap.` : (userMessage || "naber");
-
-  // Son mesajları sohbet geçmişi olarak tek user mesajı şeklinde gönder
-  // Groq'un kimin ne dediğini anlaması için isim ekle
+  // Sohbet geçmişini daha doğal bir formata sokuyoruz
   const historyText = recentHistory
     .map(h => `${h.isBot ? "Sen" : h.username}: ${h.content}`)
     .join("\n");
+    
   const historyMessages = historyText
-    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}` },
-       { role: "assistant", content: "tamam" }]
+    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}\n\nŞimdi araya girme sırası sende.` }]
     : [];
 
   const body = {
@@ -400,8 +405,8 @@ ${contextSamples || "(yok)"}`;
       ...historyMessages,
       { role: "user", content: userPrompt },
     ],
-    max_tokens: 120,
-    temperature: 0.95,
+    max_tokens: 60, // Uzun cevap vermesini fiziksel olarak engelliyoruz
+    temperature: 1.1, // Rastgeleliği ve yaratıcılığı artırdık (Markov hissiyatı için)
     top_p: 0.9,
   };
 
@@ -439,17 +444,19 @@ ${contextSamples || "(yok)"}`;
 
       if (containsReligiousAbuse(text)) return null;
 
-      const cleaned = text
+      let cleaned = text
         .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
         .replace(/[\u{2600}-\u{27BF}]/gu, "")
         .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
         .replace(/\*+|`+|_{2,}/g, "")
+        .replace(/^"|"$/g, "") // Başta ve sonda tırnak işareti koyarsa sil
+        .replace(/^(Sen:|Ben:|Bot:)/i, "") // Bazen kendi adını yazar, onu temizle
         .replace(/\s{2,}/g, " ")
         .trim();
 
       if (!cleaned) return null;
 
-      // Sadece açık reddetme kalıpları — çok geniş tutma
+      // Sadece açık reddetme kalıpları
       const refusalPatterns = [
         "cevap veremem", "cevap vermem",
         "bilgi bulunmuyor", "bilgi yok", "bilmiyorum",
