@@ -5,7 +5,8 @@ dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const { URL } = require("url");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, AttachmentBuilder } = require("discord.js");
+const { createCanvas, loadImage } = require("canvas");
 
 /* =========================
    AYARLAR
@@ -95,6 +96,167 @@ function rememberBotOutput(text) {
   if (botRecentSet.size > BOT_RECENT_LIMIT) {
     const first = botRecentSet.values().next().value;
     botRecentSet.delete(first);
+  }
+}
+
+/* =========================
+   RAGE COMIC
+========================= */
+const RAGE_FACES = {
+  trollface:    "https://upload.wikimedia.org/wikipedia/en/9/9a/Trollface_non-free.png",
+  forever_alone:"https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Forever_Alone.svg/240px-Forever_Alone.svg.png",
+  okay:         "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Smiley.svg/240px-Smiley.svg.png",
+  rage:         "https://upload.wikimedia.org/wikipedia/en/5/5f/Ragememe.png",
+  yao_ming:     "https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/Yao_Ming.jpg/220px-Yao_Ming.jpg",
+  me_gusta:     "https://upload.wikimedia.org/wikipedia/en/5/5f/Me_Gusta.png",
+  not_bad:      "https://upload.wikimedia.org/wikipedia/en/e/e9/Not_bad.png",
+  fffffffuuuu:  "https://upload.wikimedia.org/wikipedia/en/a/a3/FFFFFFFUUUUUUUUUUUU.png",
+};
+
+const FACE_KEYS = Object.keys(RAGE_FACES);
+
+// Groq'tan 2 panel için metin üret
+async function generateRageText(targetName = null) {
+  if (!GROQ_API_KEY) return null;
+
+  const contextSamples = buildContextSamples(20);
+  const subject = targetName ? `${targetName} hakkında` : "günlük hayattan komik bir durum hakkında";
+
+  const prompt = `${subject} kısa ve komik 2 panelli bir rage comic yaz.
+Panel 1: Durum veya problem (1 cümle, max 8 kelime)
+Panel 2: Tepki (1 cümle, max 8 kelime, abartılı veya alaycı olsun)
+
+Sadece şu formatta yanıt ver, başka hiçbir şey yazma:
+PANEL1: ...
+PANEL2: ...
+
+Sunucu tonu referansı:
+${contextSamples || ""}`;
+
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 80,
+          temperature: 0.9,
+        }),
+      },
+      15000
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content?.trim();
+    if (!text) return null;
+
+    const p1 = text.match(/PANEL1:\s*(.+)/i)?.[1]?.trim();
+    const p2 = text.match(/PANEL2:\s*(.+)/i)?.[1]?.trim();
+    if (!p1 || !p2) return null;
+
+    return { panel1: p1, panel2: p2 };
+  } catch (e) {
+    console.error("[RAGE] Groq error:", e?.message?.slice(0, 80));
+    return null;
+  }
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "";
+  for (const word of words) {
+    const testLine = line + word + " ";
+    if (ctx.measureText(testLine).width > maxWidth && line !== "") {
+      ctx.fillText(line.trim(), x, y);
+      line = word + " ";
+      y += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line.trim(), x, y);
+  return y;
+}
+
+async function buildRageComic(panel1Text, panel2Text, face1Key, face2Key) {
+  const PANEL_W = 300;
+  const PANEL_H = 320;
+  const PADDING = 16;
+  const TEXT_H = 80;
+  const FACE_H = PANEL_H - TEXT_H - PADDING * 2;
+  const W = PANEL_W * 2 + PADDING * 3;
+  const H = PANEL_H + PADDING * 2;
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  // Arka plan
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+
+  const drawPanel = async (text, faceKey, offsetX) => {
+    // Panel çerçevesi
+    ctx.strokeStyle = "#333333";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(offsetX, PADDING, PANEL_W, PANEL_H);
+
+    // Yüz resmi
+    try {
+      const img = await loadImage(RAGE_FACES[faceKey]);
+      const faceSize = Math.min(FACE_H, PANEL_W - PADDING * 2);
+      const imgX = offsetX + (PANEL_W - faceSize) / 2;
+      const imgY = PADDING * 2;
+      ctx.drawImage(img, imgX, imgY, faceSize, faceSize);
+    } catch (e) {
+      // Yüz yüklenemezse daire çiz
+      ctx.fillStyle = "#eeeeee";
+      ctx.beginPath();
+      ctx.arc(offsetX + PANEL_W / 2, PADDING + FACE_H / 2, FACE_H / 2 - 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Metin
+    ctx.fillStyle = "#000000";
+    ctx.font = "bold 16px Arial";
+    ctx.textAlign = "center";
+    wrapText(
+      ctx,
+      text,
+      offsetX + PANEL_W / 2,
+      PADDING + FACE_H + PADDING,
+      PANEL_W - PADDING * 2,
+      22
+    );
+  };
+
+  await drawPanel(panel1Text, face1Key, PADDING);
+  await drawPanel(panel2Text, face2Key, PADDING * 2 + PANEL_W);
+
+  return canvas.toBuffer("image/png");
+}
+
+async function sendRageComic(channel, targetName = null) {
+  try {
+    const texts = await generateRageText(targetName);
+    const p1 = texts?.panel1 || "Bu hayat böyle";
+    const p2 = texts?.panel2 || "gg ez";
+
+    const face1 = FACE_KEYS[Math.floor(Math.random() * FACE_KEYS.length)];
+    let face2 = FACE_KEYS[Math.floor(Math.random() * FACE_KEYS.length)];
+    while (face2 === face1) face2 = FACE_KEYS[Math.floor(Math.random() * FACE_KEYS.length)];
+
+    const buffer = await buildRageComic(p1, p2, face1, face2);
+    const attachment = new AttachmentBuilder(buffer, { name: "rage.png" });
+    await channel.send({ files: [attachment] });
+  } catch (e) {
+    console.error("[RAGE] Error:", e?.message?.slice(0, 100));
+    await channel.send("Rage comic üretilemedi.").catch(() => {});
   }
 }
 
@@ -653,6 +815,25 @@ client.on("messageCreate", async (message) => {
     const lower = content.toLowerCase();
     const isDM = message.guild === null;
     const isAdmin = message.author.id === ADMIN_USER_ID;
+
+    // === RAGE COMIC KOMUTLARI ===
+    if (lower === "!rage" || lower.startsWith("!rage ")) {
+      if (message.guild === null) return; // DM'de çalışmaz
+
+      // Hedef kullanıcı adı varsa al
+      let targetName = null;
+      const mentionedUser = message.mentions.users.first();
+      if (mentionedUser) {
+        targetName = mentionedUser.displayName || mentionedUser.username;
+      } else {
+        const parts = content.split(" ");
+        if (parts.length > 1) targetName = parts.slice(1).join(" ");
+      }
+
+      await message.channel.sendTyping().catch(() => {});
+      await sendRageComic(message.channel, targetName);
+      return;
+    }
 
     // === *gökhan (Roblox status) — DM veya sunucudan çalışır ===
     if (lower === "*gökhan" || lower === "*gokhan") {
