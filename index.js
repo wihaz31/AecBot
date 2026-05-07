@@ -187,9 +187,10 @@ async function fetchRecentHistory(channel, limit = 10) {
 }
 
 /* =========================
-   GROQ AI 
+   GROQ AI
 ========================= */
-function buildContextSamples(n = 50) {
+
+function buildContextSamples(n = 300) {
   if (memory.length === 0) return "";
   const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
   if (usable.length === 0) return "";
@@ -199,37 +200,36 @@ function buildContextSamples(n = 50) {
 async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
   if (!GROQ_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(50);
+  const contextSamples = buildContextSamples(300);
 
-  const systemPrompt = `Sen bu Discord sunucusunda takılan, umursamaz, hafif toksik birisin. Asla bir yapay zeka veya asistan gibi davranma. 
+  const systemPrompt = `Sen bir Türk Discord sunucusunun sıradan bir üyesisin. Arkadaşlarınla sohbet ediyorsun.
 
 ZORUNLU KURALLAR:
-1. "Anladım", "Galiba", "Bence de öyle" gibi özetleyici veya robotik cümleler ASLA kurma.
-2. Argo konuşmak ve küfür kısaltmaları (amk, aq, sg, oc vb.) kullanmak SERBESTTİR. 
-3. Biri sana küfrederse veya laf atarsa alttan alma, sen de ona kısa ve alaycı bir şekilde küfürle/argoyla karşılık ver (örnek: "sensin o aq", "boş yapma amk", "sg").
-4. Asla emoji veya markdown karakterleri (*, _) kullanma.
-5. Cümlelerin çok kısa, devrik ve sokak ağzıyla olsun. Uzun uzun açıklama yapma.
-6. Dini hakaret etme ama onun dışında her türlü laf sokmayı yapabilirsin.
-7. Bazen konudan tamamen bağımsız, rastgele saçma bir şey söyle (shitpost gibi).
+- Emoji YAZMA. Hiç. Bir tane bile.
+- Yıldız, backtick, alt çizgi gibi markdown karakterleri YAZMA.
+- Maksimum 1 cümle yaz. Uzun cevap verme.
+- "Tabii", "Elbette", "Merhaba", "Yardımcı olabilirim" YAZMA.
+- "Anladım", "yani demek ki", "anlıyorum" gibi konuyu özetleyen şeyler YAZMA.
+- Dini hakaret ve ırkçılık YAZMA.
+- Soru SORMA.
+- Konuyla alakasız şey YAZMA. Ne sorulduysa ona cevap ver.
+- Eğer mesaj anlamsız karakter dizisiyse (ASDFGH gibi) kısa ve alaycı bir şey söyle.
 
-Örnek üslup (buna benzer konuş):
-- naber la
-- boş yapma amk
-- oyuna gelceniz mi aq
-- off sg başımdan
-- ne diyon amk
-${contextSamples ? "\nSunucudan bazı konuşmalar:\n" + contextSamples : ""}`;
+TON: Kısa, samimi, sokak dili. Küfür kullanabilirsin ama her cümlede değil, sadece gerektiğinde doğal hissettirdiğinde.
 
-  const userPrompt = isRandom 
-    ? `Sohbete rastgele dal. Önceki mesaja kısa/alaycı bir tepki ver VEYA konudan tamamen bağımsız saçma sapan bir şey söyle. Sadece mesajını yaz.` 
-    : `Sana yazılan şu mesaja kısa ve umursamaz bir cevap ver: "${userMessage}"`;
+ÖRNEK KONUŞMALAR (bu tonda yaz):
+${contextSamples || "(yok)"}`;
 
+  const userPrompt = isRandom ? `Kanaldaki konuşma bu. Sen de dahil ol — fikir belirt, dalga geç, eleştir, katıl veya tamamen farklı bir şey söyle. "Anladım", "yani", "demek ki" gibi konuyu özetleyen şeyler YAZMA. Direkt bir şey söyle.` : (userMessage || "naber");
+
+  // Son mesajları sohbet geçmişi olarak tek user mesajı şeklinde gönder
+  // Groq'un kimin ne dediğini anlaması için isim ekle
   const historyText = recentHistory
     .map(h => `${h.isBot ? "Sen" : h.username}: ${h.content}`)
     .join("\n");
-    
   const historyMessages = historyText
-    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}\n\nŞimdi araya girme sırası sende.` }]
+    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}` },
+       { role: "assistant", content: "tamam" }]
     : [];
 
   const body = {
@@ -239,8 +239,8 @@ ${contextSamples ? "\nSunucudan bazı konuşmalar:\n" + contextSamples : ""}`;
       ...historyMessages,
       { role: "user", content: userPrompt },
     ],
-    max_tokens: 60,
-    temperature: 1.1,
+    max_tokens: 120,
+    temperature: 0.95,
     top_p: 0.9,
   };
 
@@ -278,18 +278,17 @@ ${contextSamples ? "\nSunucudan bazı konuşmalar:\n" + contextSamples : ""}`;
 
       if (containsReligiousAbuse(text)) return null;
 
-      let cleaned = text
+      const cleaned = text
         .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
         .replace(/[\u{2600}-\u{27BF}]/gu, "")
         .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
         .replace(/\*+|`+|_{2,}/g, "")
-        .replace(/^"|"$/g, "") 
-        .replace(/^(Sen:|Ben:|Bot:)/i, "") 
         .replace(/\s{2,}/g, " ")
         .trim();
 
       if (!cleaned) return null;
 
+      // Sadece açık reddetme kalıpları — çok geniş tutma
       const refusalPatterns = [
         "cevap veremem", "cevap vermem",
         "bilgi bulunmuyor", "bilgi yok", "bilmiyorum",
@@ -327,6 +326,10 @@ function randomSentence() {
   for (let i = 0; i < len; i++) words.push(randomFrom(WORD_POOL));
   return words.join(" ");
 }
+
+/* =========================
+   BASIT SEÇIM SORUSU (Türkçe)
+========================= */
 
 /* =========================
    ROBLOX (cache + presence)
@@ -381,6 +384,7 @@ async function fetchRobloxUniverseName(universeId) {
   }
 }
 
+// thumbnails API'si üzerinden universe ID çek (placeId'den)
 async function fetchUniverseIdFromPlace(placeId) {
   if (!placeId) return null;
   try {
@@ -421,6 +425,7 @@ async function fetchRobloxStatus() {
     let universeId = p.universeId || null;
     const lastLocation = (p.lastLocation || "").trim() || null;
 
+    // universeId yoksa placeId'den türet
     if (!universeId && placeId) {
       universeId = await fetchUniverseIdFromPlace(placeId);
     }
@@ -650,7 +655,7 @@ client.on("messageCreate", async (message) => {
     const isDM = message.guild === null;
     const isAdmin = message.author.id === ADMIN_USER_ID;
 
-    // === *gökhan (Roblox status) ===
+    // === *gökhan (Roblox status) — DM veya sunucudan çalışır ===
     if (lower === "*gökhan" || lower === "*gokhan") {
       const status = await fetchRobloxStatus();
       if (!status) { await message.reply("Roblox durumu çekemedim."); return; }
@@ -674,14 +679,14 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // === *gökhanraw (admin debug) ===
+    // === *gökhanraw (admin debug) — DM veya sunucudan ===
     if ((lower === "*gökhanraw" || lower === "*gokhanraw") && isAdmin) {
       const status = await fetchRobloxStatus();
       await message.reply("```json\n" + JSON.stringify(status?.raw ?? null, null, 2).slice(0, 1800) + "\n```");
       return;
     }
 
-    // === ADMIN KOMUTLARI ===
+    // === ADMIN KOMUTLARI — DM veya sunucudan çalışır ===
     if (isAdmin) {
       if (lower === "*reaction off") { reactionsEnabled = false; await message.reply("⛔ Reaction kapalı"); return; }
       if (lower === "*reaction on")  { reactionsEnabled = true;  await message.reply("✅ Reaction açık");  return; }
@@ -724,6 +729,7 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
+      // Komut değilse (* ile başlamıyorsa) → kanala yönlendir
       if (isDM && !lower.startsWith("*")) {
         console.log(`DM from admin: ${content}`);
         const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
@@ -732,9 +738,10 @@ client.on("messageCreate", async (message) => {
       }
     }
 
+    // Admin olmayan DM'leri yoksay
     if (isDM) return;
 
-    // === HAFIZA GÜNCELLEME ===
+    // === HAFIZA GÜNCELLEME (seed kanalı) ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
       if (!containsReligiousAbuse(content)) {
         memory.push(content);
