@@ -190,6 +190,7 @@ async function fetchRecentHistory(channel, limit = 10) {
    SUNUCU KİŞİLİĞİ ANALİZİ
 ========================= */
 let serverPersonality = ""; // Seed sonrası doldurulur
+let fewShotPairs = [];       // Seed'den çıkarılan konuşma çiftleri
 
 async function analyzeServerPersonality() {
   if (!GROQ_API_KEY || memory.length < 100) return;
@@ -236,6 +237,44 @@ ${sampleText}`;
   } catch (e) {
     console.warn("[PERSONALITY] Analiz hatası:", e?.message?.slice(0, 60));
   }
+
+  // Few-shot çiftlerini seed'den çıkar
+  buildFewShotPairs();
+}
+
+function buildFewShotPairs() {
+  if (memory.length < 20) return;
+  const usable = memory.slice(0, memory.length - RECENT_EXCLUDE);
+  const pairs = [];
+
+  for (let i = 0; i < usable.length - 1; i++) {
+    const q = usable[i];
+    const a = usable[i + 1];
+    if (!q || !a) continue;
+    if (q.includes("http") || a.includes("http")) continue;
+    if (q.includes("<@") || a.includes("<@")) continue;
+    const qw = q.split(" ").length;
+    const aw = a.split(" ").length;
+    if (qw < 2 || qw > 7) continue;
+    if (aw < 1 || aw > 6) continue;
+    if (q === q.toUpperCase() || a === a.toUpperCase()) continue;
+    if (q.length < 4 || a.length < 3) continue;
+    if (containsReligiousAbuse(q) || containsReligiousAbuse(a)) continue;
+    // Anlamsız tekrar karakterleri
+    if (/(.){3,}/.test(q) || /(.){3,}/.test(a)) continue;
+    pairs.push({ q, a });
+  }
+
+  fewShotPairs = pairs;
+  console.log(`[FEWSHOT] ${pairs.length} çift hazırlandı`);
+}
+
+function getRandomFewShot(n = 20) {
+  if (fewShotPairs.length === 0) return "";
+  const shuffled = [...fewShotPairs].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, n)
+    .map(p => `Kişi: ${p.q}\nSen: ${p.a}`)
+    .join("\n\n");
 }
 
 /* =========================
@@ -254,29 +293,28 @@ async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
 
   const contextSamples = buildContextSamples(1000);
 
-  const personalityNote = serverPersonality ? `\nSUNUCU KİŞİLİĞİ (bunu içselleştir):\n${serverPersonality}\n` : "";
-  const systemPrompt = `Sen bir Türk Discord sunucusunun sıradan bir üyesisin. Arkadaşlarınla sohbet ediyorsun.${personalityNote}
+  const fewShot = getRandomFewShot(20);
+  const personalityNote = serverPersonality ? `\n\nSUNUCU TARZI (bunu içselleştir): ${serverPersonality}` : "";
+  const systemPrompt = `Sen bu Discord sunucusunun bir üyesisin. Adın yok, sadece buradaki insanlardan birisin.${personalityNote}
 
-ZORUNLU KURALLAR:
-- Emoji YAZMA. Hiç. Bir tane bile.
-- Yıldız, backtick, alt çizgi gibi markdown karakterleri YAZMA.
-- Maksimum 1 cümle yaz. Uzun cevap verme.
-- "Tabii", "Elbette", "Merhaba", "Yardımcı olabilirim" YAZMA.
-- "Anladım", "yani demek ki", "anlıyorum" gibi konuyu özetleyen şeyler YAZMA.
-- Dini hakaret ve ırkçılık YAZMA.
-- Soru SORMA.
-- Konuyla alakasız şey YAZMA. Ne sorulduysa ona cevap ver.
-- Eğer mesaj anlamsız karakter dizisiyse (ASDFGH gibi) kısa ve alaycı bir şey söyle.
-- Az önce söylediğin şeyi TEKRAR ETME. Farklı bir şey söyle.
-- Aynı kalıbı arka arkaya kullanma. "boşuna konuşma", "boş konuşma" gibi kalıpları bir kez kullandıysan bir daha kullanma.
+Bu sunucudaki konuşma tarzı:
+- Çok kısa cevaplar. Çoğu zaman 1-4 kelime yeterli.
+- "amk", "aq", "ya", "he", "knk", "olm", "bi", "falan", "zaten", "yarram" sık kullanılır.
+- Küfür doğal ama her cümlede değil.
+- Cümleler yarım kalabilir, noktalama genelde olmaz.
+- Emoji YOK. Markdown YOK.
+- "Tabii", "elbette", "merhaba", "yardımcı olabilirim" YOK.
+- "Anladım", "yani demek ki" YOK.
+- Soru sorma.
+- Az önce söylediğini tekrar etme.
+- Dini hakaret ve ırkçılık YOK.
+- Anlamsız karakter dizisine (ASDFGH gibi) alaycı cevap ver.
 
-TON: Kısa, samimi, sokak dili. Küfür kullanabilirsin ama her cümlede değil, sadece gerektiğinde doğal hissettirdiğinde. Savunmacı veya kapatıcı cevaplar verme, konuya katıl.
+ÖRNEK KONUŞMALAR (TAM BÖYLE KONUŞ):
+${fewShot}
 
-Aşağıdaki gerçek konuşma geçmişini oku ve bu insanların tam konuşma tarzını, kelimelerini, tepkilerini taklit et. Uzun açıklama yapma, bu insanlar gibi kısa ve direkt konuş:
-
---- KONUŞMA GEÇMİŞİ ---
-${contextSamples || "(yok)"}
---- /KONUŞMA GEÇMİŞİ ---`;
+SON 1000 MESAJ (bu insanların dilini öğren):
+${contextSamples || "(yok)"}`;
 
   const userPrompt = isRandom ? `Kanaldaki konuşma bu. Sen de dahil ol — fikir belirt, dalga geç, eleştir, katıl veya tamamen farklı bir şey söyle. "Anladım", "yani", "demek ki" gibi konuyu özetleyen şeyler YAZMA. Direkt bir şey söyle.` : (userMessage || "naber");
 
@@ -606,7 +644,17 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       const t = (m.content || "").trim();
       if (!t) continue;
       if (containsReligiousAbuse(t)) continue;
-      collected.push(t);
+
+      const username = m.author.username || "biri";
+      const last = collected[collected.length - 1];
+
+      // Aynı kişinin ardışık mesajlarını birleştir
+      if (last && last.startsWith(username + ": ")) {
+        collected[collected.length - 1] = last + " " + t;
+      } else {
+        collected.push(`${username}: ${t}`);
+      }
+
       if (collected.length >= maxMessages) break;
     }
 
@@ -842,8 +890,19 @@ client.on("messageCreate", async (message) => {
     // === HAFIZA GÜNCELLEME (seed kanalı) ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
       if (!containsReligiousAbuse(content)) {
-        memory.push(content);
-        memorySet.add(normalizeText(content));
+        const username = message.author.username || "biri";
+        const entry = `${username}: ${content}`;
+        const last = memory[memory.length - 1];
+
+        // Aynı kişinin ardışık mesajlarını birleştir
+        if (last && last.startsWith(username + ": ")) {
+          memory[memory.length - 1] = last + " " + content;
+          memorySet.add(normalizeText(memory[memory.length - 1]));
+        } else {
+          memory.push(entry);
+          memorySet.add(normalizeText(entry));
+        }
+
         if (memory.length > MAX_MEMORY_MESSAGES) {
           const removed = memory.shift();
           memorySet.delete(normalizeText(removed));
