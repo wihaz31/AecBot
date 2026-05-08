@@ -267,8 +267,10 @@ ZORUNLU KURALLAR:
 - Soru SORMA.
 - Konuyla alakasız şey YAZMA. Ne sorulduysa ona cevap ver.
 - Eğer mesaj anlamsız karakter dizisiyse (ASDFGH gibi) kısa ve alaycı bir şey söyle.
+- Az önce söylediğin şeyi TEKRAR ETME. Farklı bir şey söyle.
+- Aynı kalıbı arka arkaya kullanma. "boşuna konuşma", "boş konuşma" gibi kalıpları bir kez kullandıysan bir daha kullanma.
 
-TON: Kısa, samimi, sokak dili. Küfür kullanabilirsin ama her cümlede değil, sadece gerektiğinde doğal hissettirdiğinde.
+TON: Kısa, samimi, sokak dili. Küfür kullanabilirsin ama her cümlede değil, sadece gerektiğinde doğal hissettirdiğinde. Savunmacı veya kapatıcı cevaplar verme, konuya katıl.
 
 Aşağıdaki gerçek konuşma geçmişini oku ve bu insanların tam konuşma tarzını, kelimelerini, tepkilerini taklit et. Uzun açıklama yapma, bu insanlar gibi kısa ve direkt konuş:
 
@@ -283,8 +285,15 @@ ${contextSamples || "(yok)"}
   const historyText = recentHistory
     .map(h => `${h.isBot ? "Sen" : h.username}: ${h.content}`)
     .join("\n");
+  // Botun son cevaplarını çıkar — tekrar filtrelemek için
+  const botLastReplies = recentHistory
+    .filter(h => h.isBot)
+    .map(h => h.content)
+    .slice(-3)
+    .join(", ");
+
   const historyMessages = historyText
-    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}` },
+    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}${botLastReplies ? `\n\nSen az önce şunları söyledin: "${botLastReplies}" — bunları veya benzerlerini TEKRAR ETME.` : ""}` },
        { role: "assistant", content: "tamam" }]
     : [];
 
@@ -347,7 +356,8 @@ ${contextSamples || "(yok)"}
       // Sadece açık reddetme kalıpları — çok geniş tutma
       const refusalPatterns = [
         "cevap veremem", "cevap vermem",
-        "bilgi bulunmuyor", "bilgi yok", "bilmiyorum",
+        "bilgi bulunmuyor", "bilgi yok",
+        "boşuna konuşma", "boş konuşma", "boşuna konuşuyorsun",
         "i cannot", "i can't", "i'm unable", "i won't", "i will not",
         "as an ai", "as a language model",
       ];
@@ -623,6 +633,16 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
   console.log(`Seed tamam ✅ Hafıza: ${memory.length} mesaj (#${channel.name})`);
 
+  // Seed'i dosyaya kaydet
+  try {
+    const fs = require("fs");
+    const seedContent = memory.join("\n");
+    fs.writeFileSync("seed.txt", seedContent, "utf8");
+    console.log(`[SEED] seed.txt kaydedildi (${memory.length} satır)`);
+  } catch (e) {
+    console.warn("[SEED] seed.txt kaydedilemedi:", e?.message?.slice(0, 60));
+  }
+
   // Seed bittikten sonra sunucu kişiliğini analiz et
   await analyzeServerPersonality();
 }
@@ -690,6 +710,25 @@ http.createServer(async (req, res) => {
       if (action === "seed_status") {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(seedState, null, 2));
+      }
+
+      if (action === "get_seed") {
+        const fs = require("fs");
+        if (!fs.existsSync("seed.txt")) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          return res.end("seed.txt henüz oluşturulmadı");
+        }
+        const content = fs.readFileSync("seed.txt", "utf8");
+        res.writeHead(200, {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": "attachment; filename=seed.txt",
+        });
+        return res.end(content);
+      }
+
+      if (action === "personality") {
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end(serverPersonality || "(henüz analiz yapılmadı)");
       }
 
       res.writeHead(400); return res.end("unknown action");
