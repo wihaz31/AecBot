@@ -5,7 +5,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const { URL } = require("url");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials } = require("discord.js");
 
 /* ── AYARLAR ──────────────────────────────────────── */
 const SEED_CHANNEL_ID = "705537838770421761";
@@ -729,6 +729,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
   ],
+  partials: [Partials.Channel, Partials.Message],
 });
 
 client.once("ready", async () => {
