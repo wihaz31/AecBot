@@ -25,7 +25,7 @@ const ROBLOX_USER_ID  = "2575829815";
 const GROQ_API_KEY    = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL      = "llama-3.3-70b-versatile";
 const GEMINI_API_KEY  = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL    = "gemini-2.5-flash-preview-04-17";
+const GEMINI_MODEL    = "gemini-2.0-flash";
 const RETRY_DELAYS    = [2000, 4000];
 
 let reactionsEnabled  = false;
@@ -331,7 +331,7 @@ function buildHistoryBlock(recentHistory) {
 async function analyzeServerPersonality() {
   if (!GROQ_API_KEY || memory.length < 100) return;
 
-  const sample = Array.from({ length: 200 }, () => memory[randInt(0, memory.length)]);
+  const sample = Array.from({ length: 60 }, () => memory[randInt(0, memory.length)]);
   const prompt = `Aşağıdaki Discord konuşmalarını analiz et ve bu sunucunun konuşma tarzını 5-8 cümleyle özetle.
 Şunları belirt: sık kullanılan kelimeler/argo, konuşma tonu, sık geçen konular, mizah tarzı.
 Kısa ve net yaz, madde madde değil düz metin olarak.
@@ -436,7 +436,7 @@ async function askGemini(userMessage, isRandom, recentHistory) {
 async function askGroq(userMessage, isRandom, recentHistory) {
   if (!GROQ_API_KEY) return null;
 
-  const systemText   = buildSystemPrompt(getRandomFewShot(20), buildContextSamples(1000));
+  const systemText   = buildSystemPrompt(getRandomFewShot(6), buildContextSamples(80));
   const userPrompt   = buildUserPrompt(userMessage, isRandom, recentHistory);
   const historyBlock = buildHistoryBlock(recentHistory);
 
