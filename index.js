@@ -7,154 +7,50 @@ const http = require("http");
 const { URL } = require("url");
 const { Client, GatewayIntentBits } = require("discord.js");
 
-/* =========================
-   AYARLAR
-========================= */
+/* ── AYARLAR ──────────────────────────────────────── */
 const SEED_CHANNEL_ID = "705537838770421761";
+const SEED_DAYS       = 240;
+const SEED_MAX        = 40000;
+const MAX_MEMORY      = 40000;
+const RECENT_EXCLUDE  = 100;
+const REPLY_CHANCE    = 1;
+const MENTION_CHANCE  = 1;
+const ADMIN_USER_ID   = "297433660553035778";
+const TARGET_USER_ID  = "403940186494599168";
+const EMOJI_1         = "🪑";
+const EMOJI_2         = "🪢";
+const PORT            = process.env.PORT || 8000;
+const CMD_KEY         = process.env.CMD_KEY || "";
+const ROBLOX_USER_ID  = "2575829815";
+const GROQ_API_KEY    = process.env.GROQ_API_KEY || "";
+const GROQ_MODEL      = "llama-3.3-70b-versatile";
+const GEMINI_API_KEY  = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL    = "gemini-2.5-flash-preview-04-17";
+const RETRY_DELAYS    = [2000, 4000];
 
-const SEED_DAYS = 240;
-const SEED_MAX = 40000;
+let reactionsEnabled  = false;
+let messageCounter    = 0;
+let nextMessageTarget = randInt(20, 51);
 
-const MAX_MEMORY_MESSAGES = 40000;
-const RECENT_EXCLUDE = 100;
-
-let messageCounter = 0;
-let nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 20–50
-
-const REPLY_RESPONSE_CHANCE = 1;
-const MENTION_RESPONSE_CHANCE = 1;
-
-// Reaction ayarları
-let reactionsEnabled = false;
-const ADMIN_USER_ID = "297433660553035778";
-const TARGET_USER_ID = "403940186494599168";
-const EMOJI_1 = "🪑";
-const EMOJI_2 = "🪢";
-
-// HTTP / CMD
-const PORT = process.env.PORT || 8000;
-const CMD_KEY = process.env.CMD_KEY || "";
-
-// Roblox
-const ROBLOX_USER_ID = "2575829815";
-
-// Groq
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
-
-// Gemini
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = "gemini-2.5-flash-preview-04-17";
-
-/* =========================
-   SEED DURUMU
-========================= */
+/* ── SEED DURUMU ──────────────────────────────────── */
 const seedState = {
-  running: false,
-  done: false,
-  error: null,
-  channelName: null,
-  days: SEED_DAYS,
-  max: SEED_MAX,
-  collected: 0,
-  fetchCount: 0,
-  startedAt: null,
-  lastUpdateAt: null,
+  running: false, done: false, error: null, channelName: null,
+  days: SEED_DAYS, max: SEED_MAX, collected: 0, fetchCount: 0,
+  startedAt: null, lastUpdateAt: null,
 };
 
+/* ── YARDIMCI ─────────────────────────────────────── */
+function randInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function randomFrom(arr) { return arr[randInt(0, arr.length)]; }
+
 function formatDuration(ms) {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const h = Math.floor(m / 60);
-  const ss = s % 60;
-  const mm = m % 60;
-  if (h > 0) return `${h}saat ${mm}dk ${ss}sn`;
-  if (m > 0) return `${m}dk ${ss}sn`;
-  return `${ss}sn`;
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60);
+  if (h > 0) return `${h}saat ${m % 60}dk ${s % 60}sn`;
+  if (m > 0) return `${m}dk ${s % 60}sn`;
+  return `${s}sn`;
 }
 
-/* =========================
-   HAFIZA
-========================= */
-const memory = [];
-const MAX_WORDS_PER_MESSAGE = 40;
-const memorySet = new Set();
-const botRecentSet = new Set();
-const BOT_RECENT_LIMIT = 200;
-
-// Botun kendi cevabını hem memory'ye hem context'e ekle
-function rememberBotOutput(text) {
-  if (!text || text.length < 3) return;
-
-  // Ana hafızaya ekle — bağlantı kurabilsin diye
-  memory.push(text);
-  memorySet.add(normalizeText(text));
-  if (memory.length > MAX_MEMORY_MESSAGES) {
-    const removed = memory.shift();
-    memorySet.delete(normalizeText(removed));
-  }
-
-  // Tekrar filtresi için ayrı set
-  botRecentSet.add(normalizeText(text));
-  if (botRecentSet.size > BOT_RECENT_LIMIT) {
-    const first = botRecentSet.values().next().value;
-    botRecentSet.delete(first);
-  }
-}
-
-/* =========================
-   FALLBACK WORD POOL
-========================= */
-const WORD_POOL = [
-  "aga","kanka","bro","reis","moruk","abi","hocam","sal","boşver","takıl",
-  "trip","cringe","based","random","kaos","efsane","rezalet","offfff",
-  "aynen","yokartık","şaka mı","noluyo","ne alaka","ciddiyim",
-  "lol","lmao","wtf","idk","imo","fr","no cap","cap","sheesh",
-  "mid","npc","lowkey","skill issue","touch grass",
-  "gg","ez","ff","go next","tryhard","toxic","hardstuck",
-];
-
-/* =========================
-   DİN + KÜFÜR ENGELİ
-========================= */
-function foldTR(s) {
-  return (s || "")
-    .toLowerCase()
-    .replace(/ı/g, "i").replace(/ğ/g, "g").replace(/ü/g, "u")
-    .replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c");
-}
-
-function squash(s) {
-  return foldTR(s)
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/<@!?(\d+)>/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-const RELIGIOUS_TERMS = [
-  "allah","tanri","peygamber","muhammed","4ll4h",
-  "kuran","kur an","allanı","muhammedini","peygamberini",
-].map(squash);
-
-const SWEAR_TERMS = [
-  "amk","aq","amq","o c","oc","sik","s1k","s*k","sikeyim","siktir",
-  "orospu","pic","piç","anan","bacini","got","g0t","yarrak","yarak",
-  "ibne","kahpe"
-].map(squash);
-
-function containsReligiousAbuse(text) {
-  const t = squash(text);
-  if (!t) return false;
-  const hasRel = RELIGIOUS_TERMS.some((r) => t.includes(r));
-  if (!hasRel) return false;
-  return SWEAR_TERMS.some((w) => t.includes(w));
-}
-
-/* =========================
-   FETCH TIMEOUT HELPER
-========================= */
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -165,13 +61,201 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   }
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+/* ── HAFIZA ───────────────────────────────────────── */
+const memory       = [];
+const memorySet    = new Set();
+const botRecentSet = new Set();
+const BOT_RECENT_LIMIT = 200;
+
+function normalizeText(s) {
+  return (s || "").toLowerCase().trim().replace(/\s+/g, " ").replace(/[.?!…]+$/g, "");
 }
 
-/* =========================
-   KANAL GEÇMİŞİ (son N mesaj)
-========================= */
+function addToMemory(text) {
+  if (!text) return;
+  memory.push(text);
+  memorySet.add(normalizeText(text));
+  if (memory.length > MAX_MEMORY) {
+    const removed = memory.shift();
+    memorySet.delete(normalizeText(removed));
+  }
+}
+
+function rememberBotOutput(text) {
+  if (!text || text.length < 3) return;
+  addToMemory(text);
+  botRecentSet.add(normalizeText(text));
+  if (botRecentSet.size > BOT_RECENT_LIMIT) {
+    botRecentSet.delete(botRecentSet.values().next().value);
+  }
+}
+
+/* ── DİN + KÜFÜR ENGELİ ──────────────────────────── */
+function foldTR(s) {
+  return (s || "").toLowerCase()
+    .replace(/ı/g, "i").replace(/ğ/g, "g")
+    .replace(/ü/g, "u").replace(/ş/g, "s")
+    .replace(/ö/g, "o").replace(/ç/g, "c");
+}
+
+function squash(s) {
+  return foldTR(s)
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/<@!?(\d+)>/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+
+const RELIGIOUS_TERMS = [
+  "allah","tanri","peygamber","muhammed","4ll4h",
+  "kuran","kur an","allanı","muhammedini","peygamberini",
+].map(squash);
+
+const SWEAR_TERMS = [
+  "amk","aq","amq","o c","oc","sik","s1k","s*k","sikeyim","siktir",
+  "orospu","pic","piç","anan","bacini","got","g0t","yarrak","yarak","ibne","kahpe",
+].map(squash);
+
+function containsReligiousAbuse(text) {
+  const t = squash(text);
+  if (!t) return false;
+  return RELIGIOUS_TERMS.some(r => t.includes(r)) && SWEAR_TERMS.some(w => t.includes(w));
+}
+
+/* ── AI ÇIKTI TEMİZLEME ──────────────────────────── */
+const EMOJI_RE    = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{1F300}-\u{1F9FF}]/gu;
+const MARKDOWN_RE = /\*+|`+|_{2,}/g;
+
+function cleanAIOutput(text) {
+  if (!text) return null;
+  const cleaned = text
+    .replace(EMOJI_RE, "")
+    .replace(MARKDOWN_RE, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return cleaned || null;
+}
+
+const REFUSAL_PATTERNS = [
+  "cevap veremem","cevap vermem","bilgi bulunmuyor","bilgi yok",
+  "boşuna konuşma","boş konuşma","boşuna konuşuyorsun",
+  "i cannot","i can't","i'm unable","i won't","i will not",
+  "as an ai","as a language model",
+];
+
+function isRefusal(text) {
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  return REFUSAL_PATTERNS.some(p => lower.includes(p));
+}
+
+/* ── FALLBACK WORD POOL ───────────────────────────── */
+const WORD_POOL = [
+  "aga","kanka","bro","reis","moruk","abi","hocam","sal","boşver","takıl",
+  "trip","cringe","based","random","kaos","efsane","rezalet","offfff",
+  "aynen","yokartık","şaka mı","noluyo","ne alaka","ciddiyim",
+  "lol","lmao","wtf","idk","imo","fr","no cap","cap","sheesh",
+  "mid","npc","lowkey","skill issue","touch grass",
+  "gg","ez","ff","go next","tryhard","toxic","hardstuck",
+];
+
+function randomSentence() {
+  const len = randInt(3, 7);
+  return Array.from({ length: len }, () => randomFrom(WORD_POOL)).join(" ");
+}
+
+/* ── CONTEXT & FEW-SHOT ───────────────────────────── */
+function buildContextSamples(n = 1000) {
+  if (memory.length === 0) return "";
+  // En son RECENT_EXCLUDE mesajı hariç tut (yakın zamanlı → tekrar riski var)
+  const usable = memory.slice(0, Math.max(0, memory.length - RECENT_EXCLUDE));
+  return usable.slice(-n).join("\n");
+}
+
+let serverPersonality = "";
+let fewShotPairs = [];
+
+function buildFewShotPairs() {
+  if (memory.length < 20) return;
+  const usable = memory.slice(0, memory.length - RECENT_EXCLUDE);
+  const pairs = [];
+
+  for (let i = 0; i < usable.length - 1; i++) {
+    const q = usable[i];
+    const a = usable[i + 1];
+    if (!q || !a) continue;
+    if (q.includes("http") || a.includes("http")) continue;
+    if (q.includes("<@") || a.includes("<@")) continue;
+
+    const qUser = q.split(":")[0];
+    const aUser = a.split(":")[0];
+    if (qUser === aUser) continue;
+
+    const qContent = q.includes(": ") ? q.split(": ").slice(1).join(": ") : q;
+    const aContent = a.includes(": ") ? a.split(": ").slice(1).join(": ") : a;
+
+    const qw = qContent.split(" ").length;
+    const aw = aContent.split(" ").length;
+    if (qw < 1 || qw > 10 || aw < 1 || aw > 8) continue;
+    if (qContent.length < 3 || aContent.length < 2) continue;
+    if (containsReligiousAbuse(qContent) || containsReligiousAbuse(aContent)) continue;
+    // Tekrar eden aynı karakter dizisini filtrele
+    if (/(.)\1{3,}/.test(qContent) || /(.)\1{3,}/.test(aContent)) continue;
+    if (/[A-Z]{8,}/.test(qContent) || /[A-Z]{8,}/.test(aContent)) continue;
+
+    pairs.push({ q: qContent, a: aContent });
+  }
+
+  fewShotPairs = pairs;
+  console.log(`[FEWSHOT] ${pairs.length} çift hazırlandı`);
+}
+
+function getRandomFewShot(n = 20) {
+  if (fewShotPairs.length === 0) return "";
+  return [...fewShotPairs]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, n)
+    .map(p => `— ${p.q}\n— ${p.a}`)
+    .join("\n\n");
+}
+
+/* ── SİSTEM PROMPTU (paylaşımlı) ─────────────────── */
+function buildSystemPrompt(fewShot, contextSamples) {
+  const personalityNote = serverPersonality
+    ? `\n\nBU SUNUCUNUN KENDİNE ÖZGÜ TARZI:\n${serverPersonality}`
+    : "";
+
+  return `Sen bu Discord sunucusunun eski bir üyesisin. İsmin yok, kendini tanıtmazsın.${personalityNote}
+
+KONUŞMA TARZI:
+• Çoğunlukla 1-5 kelime. Nadiren daha fazla.
+• Tek kelime cevaplar normaldir: "ya", "bilmem", "he", "neden ki", "aynen"
+• Argo: "olm", "lan", "ya", "knk", "kanka", "abi", "bro", "moruk", "hocam", "reis"
+• Kısaltmalar: "amk", "aq", "bi", "falan", "zaten", "mk", "naber", "napıyon"
+• Küfür — doğal ama her cümlede değil, sadece vurgu için
+• Noktalama genelde yok, büyük harf yok, cümleler yarım kalabilir
+• Bazen tamamen alakasız bir şey söylersin — bu normaldir
+• Bazen öfkeli, bazen dalga geçen, bazen umursamaz
+• Anlamsız karakter dizisine (asdfgh gibi) alaycı cevap ver
+
+ASLA YAPMA:
+• Emoji — kesinlikle yok
+• Markdown — yok
+• "Tabii ki", "elbette", "merhaba", "yardımcı olabilirim" — yok
+• "Anladım", "yani demek ki", "harika soru" — yok
+• Sürekli soru sormak — yok
+• Az önce söylediğini tekrar etmek — yok
+• Dini hakaret ve ırkçılık — kesinlikle yok
+• Yapay zeka olduğunu söylemek — yok
+
+ÖRNEK DİYALOGLAR:
+${fewShot || `— naber\n— iyiyim lan\n\n— bro bu ne\n— bilmiyorum ya\n\n— gelsene\n— meşgulüm\n\n— ne düşünüyorsun\n— fark etmez\n\n— çok konuştun\n— he\n\n— nasılsın\n— iyiyim sanırım`}
+
+SON MESAJLAR (bu insanların dilini, argosunu, tarzını öğren ve aynen kullan):
+${contextSamples || "(henüz mesaj yok)"}`;
+}
+
+/* ── KANAL GEÇMİŞİ ───────────────────────────────── */
 async function fetchRecentHistory(channel, limit = 10) {
   try {
     const msgs = await channel.messages.fetch({ limit: limit + 1 });
@@ -190,38 +274,77 @@ async function fetchRecentHistory(channel, limit = 10) {
   }
 }
 
-/* =========================
-   SUNUCU KİŞİLİĞİ ANALİZİ
-========================= */
-let serverPersonality = ""; // Seed sonrası doldurulur
-let fewShotPairs = [];       // Seed'den çıkarılan konuşma çiftleri
+/* ── PROMPT OLUŞTURUCULAR ─────────────────────────── */
+const SHORT_Q_WORDS = [
+  "neden","nasıl","ne","kim","nerede","niye","huh","ha",
+  "ne yani","naber","napıyon","nabıyon","ne zaman",
+];
 
+function buildUserPrompt(userMessage, isRandom, recentHistory) {
+  if (isRandom) {
+    return "Kanaldaki konuşmaya kısa bir yorum kat. Özetleme, direkt bir şey söyle.";
+  }
+
+  const isShortQ = userMessage &&
+    userMessage.trim().split(" ").length <= 3 &&
+    SHORT_Q_WORDS.some(w => userMessage.toLowerCase().includes(w));
+
+  const lastBotMsg = recentHistory.filter(h => h.isBot).slice(-1)[0]?.content || null;
+
+  if (isShortQ && lastBotMsg) {
+    return `Sen az önce "${lastBotMsg}" dedin. Şimdi "${userMessage}" diye soruyorlar. Bağlantılı ve kısa cevap ver.`;
+  }
+
+  return userMessage || "naber";
+}
+
+function buildHistoryBlock(recentHistory) {
+  const lines = [];
+
+  for (let i = 0; i < recentHistory.length; i++) {
+    const h = recentHistory[i];
+    const next = recentHistory[i + 1];
+    const name = h.isBot ? "Sen" : h.username;
+
+    if (!h.isBot && next?.isBot) {
+      lines.push(`${name}: ${h.content} → Sen: ${next.content}`);
+      i++;
+    } else if (h.isBot && i > 0 && !recentHistory[i - 1].isBot) {
+      // önceki satırda zaten gösterildi
+    } else {
+      lines.push(`${name}: ${h.content}`);
+    }
+  }
+
+  const botReplies = recentHistory
+    .filter(h => h.isBot)
+    .map(h => h.content)
+    .slice(-3)
+    .join(", ");
+
+  let block = lines.join("\n");
+  if (botReplies) block += `\n\n[Sen az önce şunları söyledin: "${botReplies}" — bunları TEKRAR ETME]`;
+  return block;
+}
+
+/* ── SUNUCU KİŞİLİĞİ ANALİZİ ─────────────────────── */
 async function analyzeServerPersonality() {
   if (!GROQ_API_KEY || memory.length < 100) return;
 
-  // Rastgele 200 mesaj al — tüm dönemi temsil etsin
-  const sample = [];
-  for (let i = 0; i < 200; i++) {
-    sample.push(memory[Math.floor(Math.random() * memory.length)]);
-  }
-  const sampleText = sample.join("\n");
-
+  const sample = Array.from({ length: 200 }, () => memory[randInt(0, memory.length)]);
   const prompt = `Aşağıdaki Discord konuşmalarını analiz et ve bu sunucunun konuşma tarzını 5-8 cümleyle özetle.
 Şunları belirt: sık kullanılan kelimeler/argo, konuşma tonu, sık geçen konular, mizah tarzı.
 Kısa ve net yaz, madde madde değil düz metin olarak.
 
 KONUŞMALAR:
-${sampleText}`;
+${sample.join("\n")}`;
 
   try {
     const res = await fetchWithTimeout(
       "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${GROQ_API_KEY}`,
-        },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
         body: JSON.stringify({
           model: GROQ_MODEL,
           messages: [{ role: "user", content: prompt }],
@@ -232,8 +355,7 @@ ${sampleText}`;
       20000
     );
     if (!res.ok) return;
-    const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content?.trim();
+    const text = (await res.json())?.choices?.[0]?.message?.content?.trim();
     if (text) {
       serverPersonality = text;
       console.log("[PERSONALITY] Analiz tamamlandı:", text.slice(0, 100) + "...");
@@ -242,135 +364,40 @@ ${sampleText}`;
     console.warn("[PERSONALITY] Analiz hatası:", e?.message?.slice(0, 60));
   }
 
-  // Few-shot çiftlerini seed'den çıkar
   buildFewShotPairs();
 }
 
-function buildFewShotPairs() {
-  if (memory.length < 20) return;
-  const usable = memory.slice(0, memory.length - RECENT_EXCLUDE);
-  const pairs = [];
-
-  for (let i = 0; i < usable.length - 1; i++) {
-    const q = usable[i];
-    const a = usable[i + 1];
-    if (!q || !a) continue;
-    if (q.includes("http") || a.includes("http")) continue;
-    if (q.includes("<@") || a.includes("<@")) continue;
-
-    // username: mesaj formatında — farklı kullanıcılar arasındaki diyaloglar
-    const qUser = q.split(":")[0];
-    const aUser = a.split(":")[0];
-    if (qUser === aUser) continue; // Aynı kişi konuşuyorsa çift değil
-
-    const qContent = q.includes(": ") ? q.split(": ").slice(1).join(": ") : q;
-    const aContent = a.includes(": ") ? a.split(": ").slice(1).join(": ") : a;
-
-    const qw = qContent.split(" ").length;
-    const aw = aContent.split(" ").length;
-    if (qw < 1 || qw > 10) continue;
-    if (aw < 1 || aw > 8) continue;
-    if (qContent.length < 3 || aContent.length < 2) continue;
-    if (containsReligiousAbuse(qContent) || containsReligiousAbuse(aContent)) continue;
-    if (/(.){4,}/.test(qContent) || /(.){4,}/.test(aContent)) continue;
-    if (/[A-Z]{8,}/.test(qContent) || /[A-Z]{8,}/.test(aContent)) continue;
-
-    pairs.push({ q, a });
-  }
-
-  fewShotPairs = pairs;
-  console.log(`[FEWSHOT] ${pairs.length} çift hazırlandı`);
-}
-
-function getRandomFewShot(n = 20) {
-  if (fewShotPairs.length === 0) return "";
-  const shuffled = [...fewShotPairs].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, n)
-    .map(p => `${p.q}\n${p.a}`)
-    .join("\n\n");
-}
-
-/* =========================
-   GEMINI AI
-========================= */
-async function askGemini(userMessage = null, isRandom = false, recentHistory = []) {
+/* ── GEMINI AI ────────────────────────────────────── */
+async function askGemini(userMessage, isRandom, recentHistory) {
   if (!GEMINI_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(1000);
-  const fewShot = getRandomFewShot(20);
-  const personalityNote = serverPersonality ? `\n\nSUNUCU TARZI: ${serverPersonality}` : "";
-
-  const systemInstruction = `Sen bu Discord sunucusunun bir üyesisin. Adın yok, sadece buradaki insanlardan birisin.${personalityNote}
-
-Bu sunucudaki konuşma tarzı:
-- Çok kısa cevaplar. Çoğu zaman 1-4 kelime yeterli.
-- "amk", "aq", "ya", "he", "knk", "olm", "bi", "falan", "zaten", "yarram" sık kullanılır.
-- Küfür doğal ama her cümlede değil.
-- Cümleler yarım kalabilir, noktalama genelde olmaz.
-- Emoji YOK. Markdown YOK.
-- "Tabii", "elbette", "merhaba", "yardımcı olabilirim" YOK.
-- "Anladım", "yani demek ki" YOK.
-- Soru sorma.
-- Az önce söylediğini tekrar etme.
-- Dini hakaret ve ırkçılık YOK.
-
-ÖRNEK KONUŞMALAR (TAM BÖYLE KONUŞ):
-${fewShot}
-
-SON 1000 MESAJ:
-${contextSamples || "(yok)"}`;
-
-  const shortQuestionWords = ["neden", "nasıl", "ne", "kim", "nerede", "niye", "huh", "ha", "ne yani", "naber", "napıyon", "nabıyon"];
-  const isShortQuestion = !isRandom && userMessage && userMessage.trim().split(" ").length <= 3 &&
-    shortQuestionWords.some(w => userMessage.toLowerCase().includes(w));
-
-  const lastBotMsg = recentHistory.filter(h => h.isBot).slice(-1)[0]?.content || null;
-  let contextualPrompt = userMessage || "naber";
-  if (isShortQuestion && lastBotMsg) {
-    contextualPrompt = `Sen az önce "${lastBotMsg}" dedin. Şimdi sana "${userMessage}" diye soruyorlar. Kısa ve bağlantılı cevap ver.`;
-  }
-
-  const userPrompt = isRandom
-    ? `Kanaldaki konuşmaya kısa bir yorum yap. "Anladım", "yani" gibi özetleyici şeyler yazma.`
-    : contextualPrompt;
-
-  const historyText = recentHistory
-    .map((h, i) => {
-      const name = h.isBot ? "Sen" : h.username;
-      const next = recentHistory[i + 1];
-      if (!h.isBot && next && next.isBot) return `\${name}: \${h.content} → Sen: \${next.content}`;
-      if (h.isBot && i > 0 && !recentHistory[i-1].isBot) return null;
-      return `\${name}: \${h.content}`;
-    })
-    .filter(Boolean).join("\n");
-
-  const botLastReplies = recentHistory.filter(h => h.isBot).map(h => h.content).slice(-3).join(", ");
+  const systemText    = buildSystemPrompt(getRandomFewShot(20), buildContextSamples(1000));
+  const userPrompt    = buildUserPrompt(userMessage, isRandom, recentHistory);
+  const historyBlock  = buildHistoryBlock(recentHistory);
 
   const contents = [];
-  if (historyText) {
-    const histMsg = "Son konuşmalar:\n" + historyText + (botLastReplies ? "\n\nSen az önce şunları söyledin: \"" + botLastReplies + "\" — bunları TEKRAR ETME." : "");
-    contents.push({ role: "user", parts: [{ text: histMsg }] });
+  if (historyBlock.trim()) {
+    contents.push({ role: "user",  parts: [{ text: "Son konuşmalar:\n" + historyBlock }] });
     contents.push({ role: "model", parts: [{ text: "tamam" }] });
   }
   contents.push({ role: "user", parts: [{ text: userPrompt }] });
 
   const body = {
-    system_instruction: { parts: [{ text: systemInstruction }] },
+    system_instruction: { parts: [{ text: systemText }] },
     contents,
-    generationConfig: { maxOutputTokens: 100, temperature: 0.95, topP: 0.9 },
+    generationConfig: { maxOutputTokens: 80, temperature: 1.0, topP: 0.92 },
     safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HARASSMENT",       threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH",       threshold: "BLOCK_NONE" },
       { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
       { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
     ],
   };
 
-  const RETRY_DELAYS = [2000, 4000];
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     try {
       const res = await fetchWithTimeout(
-        `https://generativelanguage.googleapis.com/v1beta/models/\${GEMINI_MODEL}:generateContent?key=\${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
         15000
       );
@@ -378,41 +405,23 @@ ${contextSamples || "(yok)"}`;
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
         if ((res.status === 503 || res.status === 429) && attempt < RETRY_DELAYS.length) {
-          console.warn(`[GEMINI] \${res.status} retry \${attempt + 1}`);
+          console.warn(`[GEMINI] ${res.status} retry ${attempt + 1}`);
           await sleep(RETRY_DELAYS[attempt]);
           continue;
         }
-        console.error(`[GEMINI] HTTP \${res.status}:`, errText.slice(0, 150));
+        console.error(`[GEMINI] HTTP ${res.status}:`, errText.slice(0, 150));
         return null;
       }
 
-      const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text) return null;
-      if (containsReligiousAbuse(text)) return null;
-
-      const cleaned = text
-        .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
-        .replace(/[\u{2600}-\u{27BF}]/gu, "")
-        .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
-        .replace(/\*+|`+|_{2,}/g, "")
-        .replace(/\s{2,}/g, " ").trim();
-
-      if (!cleaned) return null;
-
-      const refusalPatterns = [
-        "cevap veremem", "cevap vermem", "bilgi bulunmuyor",
-        "boşuna konuşma", "boş konuşma",
-        "i cannot", "i can't", "i'm unable", "i won't", "i will not",
-        "as an ai", "as a language model",
-      ];
-      if (refusalPatterns.some(p => cleaned.toLowerCase().includes(p))) return null;
-
+      const raw = (await res.json())?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!raw || containsReligiousAbuse(raw)) return null;
+      const cleaned = cleanAIOutput(raw);
+      if (!cleaned || isRefusal(cleaned)) return null;
       return cleaned;
 
     } catch (e) {
       if (attempt < RETRY_DELAYS.length) {
-        console.warn(`[GEMINI] retry: \${e?.name}`);
+        console.warn(`[GEMINI] retry: ${e?.name}`);
         await sleep(RETRY_DELAYS[attempt]);
         continue;
       }
@@ -423,108 +432,22 @@ ${contextSamples || "(yok)"}`;
   return null;
 }
 
-/* =========================
-   GROQ AI
-========================= */
-
-function buildContextSamples(n = 1000) {
-  if (memory.length === 0) return "";
-  const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
-  if (usable.length === 0) return "";
-  return usable.slice(-n).join("\n");
-}
-
-async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
-  // Gemini önce dene, olmazsa Groq
-  if (GEMINI_API_KEY) {
-    const geminiResult = await askGemini(userMessage, isRandom, recentHistory);
-    if (geminiResult) return geminiResult;
-  }
+/* ── GROQ AI ──────────────────────────────────────── */
+async function askGroq(userMessage, isRandom, recentHistory) {
   if (!GROQ_API_KEY) return null;
 
-  const contextSamples = buildContextSamples(1000);
+  const systemText   = buildSystemPrompt(getRandomFewShot(20), buildContextSamples(1000));
+  const userPrompt   = buildUserPrompt(userMessage, isRandom, recentHistory);
+  const historyBlock = buildHistoryBlock(recentHistory);
 
-  const fewShot = getRandomFewShot(20);
-  const personalityNote = serverPersonality ? `\n\nSUNUCU TARZI (bunu içselleştir): ${serverPersonality}` : "";
-  const systemPrompt = `Sen bu Discord sunucusunun bir üyesisin. Adın yok, sadece buradaki insanlardan birisin.${personalityNote}
-
-Bu sunucudaki konuşma tarzı:
-- Çok kısa cevaplar. Çoğu zaman 1-4 kelime yeterli.
-- "amk", "aq", "ya", "he", "knk", "olm", "bi", "falan", "zaten", "yarram" sık kullanılır.
-- Küfür doğal ama her cümlede değil.
-- Cümleler yarım kalabilir, noktalama genelde olmaz.
-- Emoji YOK. Markdown YOK.
-- "Tabii", "elbette", "merhaba", "yardımcı olabilirim" YOK.
-- "Anladım", "yani demek ki" YOK.
-- Soru sorma.
-- Az önce söylediğini tekrar etme.
-- Dini hakaret ve ırkçılık YOK.
-- Anlamsız karakter dizisine (ASDFGH gibi) alaycı cevap ver.
-
-ÖRNEK KONUŞMALAR (TAM BÖYLE KONUŞ):
-${fewShot}
-
-SON 1000 MESAJ (bu insanların dilini öğren):
-${contextSamples || "(yok)"}`;
-
-  // Kısa sorularda (neden, nasıl, ne, kim gibi) önceki bağlamı prompt'a ekle
-  const shortQuestionWords = ["neden", "nasıl", "ne", "kim", "nerede", "ne zaman", "niye", "huh", "ha", "ne yani"];
-  const isShortQuestion = !isRandom && userMessage && userMessage.trim().split(" ").length <= 2 &&
-    shortQuestionWords.some(w => userMessage.toLowerCase().includes(w));
-
-  // Botun son cevabını bul
-  const lastBotMsg = recentHistory.filter(h => h.isBot).slice(-1)[0]?.content || null;
-  const lastUserMsg = recentHistory.filter(h => !h.isBot).slice(-1)[0]?.content || null;
-
-  // Kısa soru için bağlamı açıkça belirt
-  let contextualPrompt = userMessage || "naber";
-  if (isShortQuestion && lastBotMsg) {
-    contextualPrompt = `Sen az önce "${lastBotMsg}" dedin. Şimdi sana "${userMessage}" diye soruyorlar. Buna kısa ve bağlantılı cevap ver.`;
+  const messages = [{ role: "system", content: systemText }];
+  if (historyBlock.trim()) {
+    messages.push({ role: "user",      content: "Son konuşmalar:\n" + historyBlock });
+    messages.push({ role: "assistant", content: "tamam" });
   }
+  messages.push({ role: "user", content: userPrompt });
 
-  const userPrompt = isRandom
-    ? `Kanaldaki konuşma bu. Sen de dahil ol — fikir belirt, dalga geç, eleştir, katıl veya tamamen farklı bir şey söyle. "Anladım", "yani", "demek ki" gibi konuyu özetleyen şeyler YAZMA. Direkt bir şey söyle.`
-    : contextualPrompt;
-
-  // History — soru/cevap çifti olarak formatla
-  const historyText = recentHistory
-    .map((h, i) => {
-      const name = h.isBot ? "Sen" : h.username;
-      const next = recentHistory[i + 1];
-      // Soru-cevap çifti göster
-      if (!h.isBot && next && next.isBot) {
-        return `${name}: ${h.content} → Sen: ${next.content}`;
-      }
-      if (h.isBot && i > 0 && !recentHistory[i-1].isBot) return null; // Zaten çiftte gösterildi
-      return `${name}: ${h.content}`;
-    })
-    .filter(Boolean)
-    .join("\n");
-
-  const botLastReplies = recentHistory
-    .filter(h => h.isBot)
-    .map(h => h.content)
-    .slice(-3)
-    .join(", ");
-
-  const historyMessages = historyText
-    ? [{ role: "user", content: `Son konuşmalar:\n${historyText}${botLastReplies ? `\n\nSen az önce şunları söyledin: "${botLastReplies}" — bunları veya benzerlerini TEKRAR ETME.` : ""}` },
-       { role: "assistant", content: "tamam" }]
-    : [];
-
-  const body = {
-    model: GROQ_MODEL,
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...historyMessages,
-      { role: "user", content: userPrompt },
-    ],
-    max_tokens: 120,
-    temperature: 0.95,
-    top_p: 0.9,
-  };
-
-  const RETRY_DELAYS = [2000, 4000];
+  const body = { model: GROQ_MODEL, messages, max_tokens: 80, temperature: 1.0, top_p: 0.92 };
 
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     try {
@@ -532,10 +455,7 @@ ${contextSamples || "(yok)"}`;
         "https://api.groq.com/openai/v1/chat/completions",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${GROQ_API_KEY}`,
-          },
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
           body: JSON.stringify(body),
         },
         15000
@@ -544,7 +464,7 @@ ${contextSamples || "(yok)"}`;
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
         if ((res.status === 503 || res.status === 429) && attempt < RETRY_DELAYS.length) {
-          console.warn(`[GROQ] ${res.status} - retry ${attempt + 1}`);
+          console.warn(`[GROQ] ${res.status} retry ${attempt + 1}`);
           await sleep(RETRY_DELAYS[attempt]);
           continue;
         }
@@ -552,37 +472,15 @@ ${contextSamples || "(yok)"}`;
         return null;
       }
 
-      const data = await res.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (!text) return null;
-
-      if (containsReligiousAbuse(text)) return null;
-
-      const cleaned = text
-        .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
-        .replace(/[\u{2600}-\u{27BF}]/gu, "")
-        .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
-        .replace(/\*+|`+|_{2,}/g, "")
-        .replace(/\s{2,}/g, " ")
-        .trim();
-
-      if (!cleaned) return null;
-
-      // Sadece açık reddetme kalıpları — çok geniş tutma
-      const refusalPatterns = [
-        "cevap veremem", "cevap vermem",
-        "bilgi bulunmuyor", "bilgi yok",
-        "boşuna konuşma", "boş konuşma", "boşuna konuşuyorsun",
-        "i cannot", "i can't", "i'm unable", "i won't", "i will not",
-        "as an ai", "as a language model",
-      ];
-      if (refusalPatterns.some(p => cleaned.toLowerCase().includes(p))) return null;
-
+      const raw = (await res.json())?.choices?.[0]?.message?.content?.trim();
+      if (!raw || containsReligiousAbuse(raw)) return null;
+      const cleaned = cleanAIOutput(raw);
+      if (!cleaned || isRefusal(cleaned)) return null;
       return cleaned;
 
     } catch (e) {
       if (attempt < RETRY_DELAYS.length) {
-        console.warn(`[GROQ] Hata, retry: ${e?.name}`);
+        console.warn(`[GROQ] retry: ${e?.name}`);
         await sleep(RETRY_DELAYS[attempt]);
         continue;
       }
@@ -590,50 +488,35 @@ ${contextSamples || "(yok)"}`;
       return null;
     }
   }
-
   return null;
 }
 
-/* =========================
-   FALLBACK: basit kelime üret (Gemini çalışmazsa)
-========================= */
-function randomFrom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+/* Gemini → Groq sırasıyla dene */
+async function askAI(userMessage = null, isRandom = false, recentHistory = []) {
+  if (GEMINI_API_KEY) {
+    const result = await askGemini(userMessage, isRandom, recentHistory);
+    if (result) return result;
+  }
+  return askGroq(userMessage, isRandom, recentHistory);
 }
 
-function randomSentence() {
-  const len = Math.floor(Math.random() * 4) + 3;
-  const words = [];
-  for (let i = 0; i < len; i++) words.push(randomFrom(WORD_POOL));
-  return words.join(" ");
-}
-
-/* =========================
-   BASIT SEÇIM SORUSU (Türkçe)
-========================= */
-
-/* =========================
-   ROBLOX (cache + presence)
-========================= */
-const placeNameCache = new Map();
+/* ── ROBLOX ───────────────────────────────────────── */
+const placeNameCache   = new Map();
 const universeNameCache = new Map();
-const ROBLOX_CACHE_MS = 10 * 60 * 1000;
+const ROBLOX_CACHE_MS  = 10 * 60 * 1000;
 
 async function fetchRobloxPlaceName(placeId) {
   if (!placeId) return null;
-  const key = String(placeId);
+  const key    = String(placeId);
   const cached = placeNameCache.get(key);
   if (cached && cached.exp > Date.now()) return cached.name;
-
   try {
     const r = await fetchWithTimeout(
       `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`,
-      {},
-      12000
+      {}, 12000
     );
     if (!r.ok) return null;
-    const arr = await r.json();
-    const name = arr?.[0]?.name || null;
+    const name = (await r.json())?.[0]?.name || null;
     placeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
   } catch (e) {
@@ -644,19 +527,16 @@ async function fetchRobloxPlaceName(placeId) {
 
 async function fetchRobloxUniverseName(universeId) {
   if (!universeId) return null;
-  const key = String(universeId);
+  const key    = String(universeId);
   const cached = universeNameCache.get(key);
   if (cached && cached.exp > Date.now()) return cached.name;
-
   try {
     const r = await fetchWithTimeout(
       `https://games.roblox.com/v1/games?universeIds=${Number(universeId)}`,
-      {},
-      12000
+      {}, 12000
     );
     if (!r.ok) return null;
-    const data = await r.json();
-    const name = data?.data?.[0]?.name || null;
+    const name = (await r.json())?.data?.[0]?.name || null;
     universeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
   } catch (e) {
@@ -665,18 +545,15 @@ async function fetchRobloxUniverseName(universeId) {
   }
 }
 
-// thumbnails API'si üzerinden universe ID çek (placeId'den)
 async function fetchUniverseIdFromPlace(placeId) {
   if (!placeId) return null;
   try {
     const r = await fetchWithTimeout(
       `https://apis.roblox.com/universes/v1/places/${Number(placeId)}/universe`,
-      {},
-      12000
+      {}, 12000
     );
     if (!r.ok) return null;
-    const data = await r.json();
-    return data?.universeId || null;
+    return (await r.json())?.universeId || null;
   } catch (e) {
     console.error("Roblox universe-from-place error:", e?.name);
     return null;
@@ -694,27 +571,22 @@ async function fetchRobloxStatus() {
       },
       12000
     );
-
     if (!r.ok) return null;
 
-    const data = await r.json();
-    const p = data?.userPresences?.[0];
+    const p = (await r.json())?.userPresences?.[0];
     if (!p) return null;
 
-    const presenceType = p.userPresenceType;
-    const placeId = p.placeId || null;
-    let universeId = p.universeId || null;
-    const lastLocation = (p.lastLocation || "").trim() || null;
+    const presenceType  = p.userPresenceType;
+    const placeId       = p.placeId || null;
+    let   universeId    = p.universeId || null;
+    const lastLocation  = (p.lastLocation || "").trim() || null;
 
-    // universeId yoksa placeId'den türet
-    if (!universeId && placeId) {
-      universeId = await fetchUniverseIdFromPlace(placeId);
-    }
+    if (!universeId && placeId) universeId = await fetchUniverseIdFromPlace(placeId);
 
     let gameName = null;
-    if (placeId) gameName = await fetchRobloxPlaceName(placeId);
+    if (placeId)    gameName = await fetchRobloxPlaceName(placeId);
     if (!gameName && universeId) gameName = await fetchRobloxUniverseName(universeId);
-    if (!gameName && lastLocation) gameName = lastLocation;
+    if (!gameName)  gameName = lastLocation;
 
     return { presenceType, placeId, universeId, lastLocation, gameName, raw: p };
   } catch (e) {
@@ -723,49 +595,36 @@ async function fetchRobloxStatus() {
   }
 }
 
-/* =========================
-   SEED
-========================= */
-function normalizeText(s) {
-  return (s || "").toLowerCase().trim().replace(/\s+/g, " ").replace(/[.?!…]+$/g, "");
-}
-
+/* ── SEED ─────────────────────────────────────────── */
 async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   const collected = [];
   let beforeId = undefined;
 
-  seedState.running = true;
-  seedState.done = false;
-  seedState.error = null;
-  seedState.channelName = channel?.name || null;
-  seedState.days = days;
-  seedState.max = maxMessages;
-  seedState.collected = 0;
-  seedState.fetchCount = 0;
-  seedState.startedAt = Date.now();
-  seedState.lastUpdateAt = seedState.startedAt;
+  Object.assign(seedState, {
+    running: true, done: false, error: null,
+    channelName: channel?.name || null,
+    days, max: maxMessages, collected: 0, fetchCount: 0,
+    startedAt: Date.now(), lastUpdateAt: Date.now(),
+  });
 
   const startedAt = seedState.startedAt;
-  let lastLogAt = startedAt;
-  let lastBeat = 0;
+  let lastLogAt = startedAt, lastBeat = 0;
 
   const beat = (tag, extra = "") => {
     const now = Date.now();
-    if (now - lastBeat >= 5000) {
-      lastBeat = now;
-      console.log(`[SEED] ${tag} fetch=${seedState.fetchCount} collected=${collected.length} ${extra}`);
-    }
+    if (now - lastBeat < 5000) return;
+    lastBeat = now;
+    console.log(`[SEED] ${tag} fetch=${seedState.fetchCount} collected=${collected.length} ${extra}`);
   };
 
   const logProgress = (force = false) => {
     const now = Date.now();
     if (!force && now - lastLogAt < 5000) return;
     lastLogAt = now;
-    const elapsedMs = now - startedAt;
-    const elapsedSec = Math.max(1, Math.floor(elapsedMs / 1000));
-    const rate = Math.round(collected.length / elapsedSec);
-    console.log(`Seed progress: ${collected.length}/${maxMessages} | fetch=${seedState.fetchCount} | ${formatDuration(elapsedMs)} | ~${rate} msg/sn`);
+    const elapsed = now - startedAt;
+    const rate = Math.round(collected.length / Math.max(1, elapsed / 1000));
+    console.log(`Seed: ${collected.length}/${maxMessages} | fetch=${seedState.fetchCount} | ${formatDuration(elapsed)} | ~${rate} msg/sn`);
     seedState.collected = collected.length;
     seedState.lastUpdateAt = now;
   };
@@ -773,7 +632,7 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   console.log(`Seed başladı: son ${days} gün, max ${maxMessages} mesaj (#${channel.name})`);
 
   while (collected.length < maxMessages) {
-    await new Promise((r) => setImmediate(r));
+    await new Promise(r => setImmediate(r));
 
     const batchSize = Math.min(100, maxMessages - collected.length);
     const opts = { limit: batchSize };
@@ -791,7 +650,7 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       const retryAfter = e?.data?.retry_after ?? e?.retry_after ?? e?.rawError?.retry_after ?? null;
       if (retryAfter) {
         const waitMs = Math.ceil(Number(retryAfter) * 1000) + 750;
-        console.log(`[SEED] RATE LIMIT: ${retryAfter}s -> bekliyorum...`);
+        console.log(`[SEED] RATE LIMIT: ${retryAfter}s bekliyor...`);
         await sleep(waitMs);
         continue;
       }
@@ -802,14 +661,12 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       }
       seedState.error = e?.message || String(e);
       seedState.running = false;
-      seedState.done = false;
       console.error("[SEED] FETCH ERROR:", e?.name, e?.message);
       return;
     }
 
     seedState.fetchCount++;
     beat("after-fetch", `size=${msgs?.size ?? 0}`);
-
     if (!msgs || msgs.size === 0) break;
 
     const arr = Array.from(msgs.values()).reverse();
@@ -819,13 +676,11 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       if (m.createdTimestamp < cutoff) { reachedCutoff = true; break; }
       if (m.author.bot) continue;
       const t = (m.content || "").trim();
-      if (!t) continue;
-      if (containsReligiousAbuse(t)) continue;
+      if (!t || containsReligiousAbuse(t)) continue;
 
       const username = m.author.username || "biri";
       const last = collected[collected.length - 1];
 
-      // Aynı kişinin ardışık mesajlarını birleştir
       if (last && last.startsWith(username + ": ")) {
         collected[collected.length - 1] = last + " " + t;
       } else {
@@ -846,35 +701,27 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
   memory.length = 0;
   memory.push(...collected);
-  while (memory.length > MAX_MEMORY_MESSAGES) memory.shift();
+  while (memory.length > MAX_MEMORY) memory.shift();
 
   memorySet.clear();
   for (const t of memory) memorySet.add(normalizeText(t));
 
   logProgress(true);
-  seedState.running = false;
-  seedState.done = true;
-  seedState.error = null;
-
+  Object.assign(seedState, { running: false, done: true, error: null });
   console.log(`Seed tamam ✅ Hafıza: ${memory.length} mesaj (#${channel.name})`);
 
-  // Seed'i dosyaya kaydet
   try {
     const fs = require("fs");
-    const seedContent = memory.join("\n");
-    fs.writeFileSync("seed.txt", seedContent, "utf8");
+    fs.writeFileSync("seed.txt", memory.join("\n"), "utf8");
     console.log(`[SEED] seed.txt kaydedildi (${memory.length} satır)`);
   } catch (e) {
     console.warn("[SEED] seed.txt kaydedilemedi:", e?.message?.slice(0, 60));
   }
 
-  // Seed bittikten sonra sunucu kişiliğini analiz et
   await analyzeServerPersonality();
 }
 
-/* =========================
-   DISCORD CLIENT
-========================= */
+/* ── DISCORD CLIENT ───────────────────────────────── */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -884,40 +731,32 @@ const client = new Client({
   ],
 });
 
-async function onClientReady() {
+client.once("ready", async () => {
   console.log(`Bot aktif: ${client.user.tag}`);
-  if (!GROQ_API_KEY) {
-    console.warn("[GROQ] UYARI: GROQ_API_KEY tanımlı değil! Fallback kullanılacak.");
-  }
+  if (!GROQ_API_KEY) console.warn("[GROQ] UYARI: GROQ_API_KEY tanımlı değil!");
 
   try {
     const ch = await client.channels.fetch(SEED_CHANNEL_ID);
-    if (!ch || !ch.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
+    if (!ch?.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
     console.log(`Seed: Kanal bulundu -> #${ch.name}`);
     await seedByDays(ch, SEED_DAYS, SEED_MAX);
   } catch (e) {
     console.error("Seed error:", e);
   }
-}
+});
 
-client.once("ready", onClientReady);
-client.once("clientReady", onClientReady);
-
-/* =========================
-   HTTP SERVER
-========================= */
+/* ── HTTP SERVER ──────────────────────────────────── */
 http.createServer(async (req, res) => {
   try {
-    const u = new URL(req.url, `http://${req.headers.host}`);
-    const path = u.pathname;
+    const u      = new URL(req.url, `http://${req.headers.host}`);
+    const path   = u.pathname;
+    const action = (u.searchParams.get("action") || "").toLowerCase();
 
     if (path === "/") { res.writeHead(200); return res.end("OK"); }
 
     if (path === "/cmd") {
       const key = u.searchParams.get("key") || "";
       if (!CMD_KEY || key !== CMD_KEY) { res.writeHead(401); return res.end("unauthorized"); }
-
-      const action = (u.searchParams.get("action") || "").toLowerCase();
 
       if (action === "reaction_off") { reactionsEnabled = false; res.writeHead(200); return res.end("ok"); }
       if (action === "reaction_on")  { reactionsEnabled = true;  res.writeHead(200); return res.end("ok"); }
@@ -939,15 +778,9 @@ http.createServer(async (req, res) => {
 
       if (action === "get_seed") {
         const fs = require("fs");
-        if (!fs.existsSync("seed.txt")) {
-          res.writeHead(404, { "Content-Type": "text/plain" });
-          return res.end("seed.txt henüz oluşturulmadı");
-        }
+        if (!fs.existsSync("seed.txt")) { res.writeHead(404); return res.end("seed.txt henüz oluşturulmadı"); }
         const content = fs.readFileSync("seed.txt", "utf8");
-        res.writeHead(200, {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": "attachment; filename=seed.txt",
-        });
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": "attachment; filename=seed.txt" });
         return res.end(content);
       }
 
@@ -965,188 +798,171 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => console.log(`HTTP server on ${PORT}`));
 
-/* =========================
-   MESSAGE HANDLER
-========================= */
+/* ── CEVAP GÖNDERİCİ (yazıyor efekti) ────────────── */
+async function sendReply(target, text, channel = null) {
+  // Kısa bir "yazıyor..." gecikmesi — daha insancıl hissettiriyor
+  const typingDelay = Math.min(text.length * 40 + randInt(300, 800), 3000);
+  if (channel) channel.sendTyping().catch(() => {});
+  else if (target.channel) target.channel.sendTyping().catch(() => {});
+  await sleep(typingDelay);
+
+  if (channel) return channel.send(text);
+  return target.reply(text);
+}
+
+/* ── MESSAGE HANDLER ──────────────────────────────── */
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
 
     const content = (message.content || "").trim();
-
-    const lower = content.toLowerCase();
-    const isDM = message.guild === null;
+    const lower   = content.toLowerCase();
+    const isDM    = message.guild === null;
     const isAdmin = message.author.id === ADMIN_USER_ID;
 
-    // === *gökhan (Roblox status) — DM veya sunucudan çalışır ===
+    /* === *gökhan (Roblox durumu) === */
     if (lower === "*gökhan" || lower === "*gokhan") {
       const status = await fetchRobloxStatus();
-      if (!status) { await message.reply("Roblox durumu çekemedim."); return; }
+      if (!status) { await message.reply("roblox durumu çekemedim"); return; }
 
-      if (status.presenceType === 0) { await message.reply("offline."); return; }
-      if (status.presenceType === 3) { await message.reply("Gökhan Studio'da nabıyon aq."); return; }
-
+      if (status.presenceType === 0) { await message.reply("offline"); return; }
+      if (status.presenceType === 3) { await message.reply("studio'da"); return; }
       if (status.presenceType === 2) {
-        let gameText = status.gameName;
-        if (!gameText) {
-          gameText = status.lastLocation ||
-            (status.placeId ? `placeId: ${status.placeId}` : null) ||
-            (status.universeId ? `universeId: ${status.universeId}` : null) ||
-            "Roblox oyun bilgisi yok (privacy kapalı olabilir)";
-        }
-        await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${gameText}`);
+        const gameText = status.gameName ||
+          (status.placeId ? `placeId: ${status.placeId}` : null) ||
+          (status.universeId ? `universeId: ${status.universeId}` : null) ||
+          "oyun bilgisi yok";
+        await message.reply(`robloxta\n${gameText}`);
         return;
       }
-
-      await message.reply("online.");
+      await message.reply("online");
       return;
     }
 
-    // === *gökhanraw (admin debug) — DM veya sunucudan ===
+    /* === *gökhanraw (admin debug) === */
     if ((lower === "*gökhanraw" || lower === "*gokhanraw") && isAdmin) {
       const status = await fetchRobloxStatus();
       await message.reply("```json\n" + JSON.stringify(status?.raw ?? null, null, 2).slice(0, 1800) + "\n```");
       return;
     }
 
-    // === ADMIN KOMUTLARI — DM veya sunucudan çalışır ===
+    /* === ADMIN KOMUTLARI === */
     if (isAdmin) {
-      if (lower === "*reaction off") { reactionsEnabled = false; await message.reply("⛔ Reaction kapalı"); return; }
-      if (lower === "*reaction on")  { reactionsEnabled = true;  await message.reply("✅ Reaction açık");  return; }
-      if (lower === "*reaction status") { await message.reply(reactionsEnabled ? "✅ AÇIK" : "⛔ KAPALI"); return; }
+      if (lower === "*reaction off")    { reactionsEnabled = false; await message.reply("reaction kapalı"); return; }
+      if (lower === "*reaction on")     { reactionsEnabled = true;  await message.reply("reaction açık");   return; }
+      if (lower === "*reaction status") { await message.reply(reactionsEnabled ? "açık" : "kapalı"); return; }
 
       if (lower === "*seed status") {
-        if (!seedState.startedAt) { await message.reply("Seed başlamadı."); return; }
+        if (!seedState.startedAt) { await message.reply("seed başlamadı"); return; }
         const elapsed = Date.now() - seedState.startedAt;
-        const rate = Math.round(seedState.collected / Math.max(1, elapsed / 1000));
-        const st = seedState.running ? "⏳ ÇALIŞIYOR" : seedState.done ? "✅ TAMAMLANDI" : seedState.error ? "❌ HATA" : "⏸️ DURDU";
+        const rate    = Math.round(seedState.collected / Math.max(1, elapsed / 1000));
+        const st      = seedState.running ? "çalışıyor" : seedState.done ? "tamamlandı" : seedState.error ? "hata" : "durdu";
         await message.reply([
-          `Seed: ${st}`,
-          `Kanal: #${seedState.channelName ?? "?"}`,
-          `Toplandı: ${seedState.collected}/${seedState.max}`,
-          `Fetch: ${seedState.fetchCount}`,
-          `Süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
-          seedState.error ? `Hata: ${seedState.error}` : null,
+          `seed: ${st}`,
+          `kanal: #${seedState.channelName ?? "?"}`,
+          `toplanan: ${seedState.collected}/${seedState.max}`,
+          `fetch: ${seedState.fetchCount}`,
+          `süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
+          seedState.error ? `hata: ${seedState.error}` : null,
         ].filter(Boolean).join("\n"));
         return;
       }
 
       if (lower === "*ai test") {
-        const out = await askAI("Merhaba, nasılsın?", false);
-        await message.reply(out ? `✅ Groq: ${out}` : "❌ Groq yanıt vermedi (key kontrol et)");
+        const out = await askAI("naber", false);
+        await message.reply(out ? `ok: ${out}` : "yanıt yok (key kontrol et)");
         return;
       }
 
       if (lower === "*yardim" || lower === "*help") {
         await message.reply([
-          "**Admin Komutları:**",
-          "`*reaction on/off/status` — reaction aç/kapat",
-          "`*seed status` — seed durumu",
-          "`*ai test` — Groq bağlantısını test et",
-          "`*gökhan` — Roblox durumu",
-          "`*gökhanraw` — Roblox ham veri",
-          "`*yardim` — bu liste",
-          "",
-          "DM'den yazılan diğer mesajlar kanala yönlendirilir.",
+          "**komutlar:**",
+          "`*reaction on/off/status`",
+          "`*seed status`",
+          "`*ai test`",
+          "`*gökhan`",
+          "`*gökhanraw`",
+          "`*yardim`",
         ].join("\n"));
         return;
       }
 
-      // Komut değilse (* ile başlamıyorsa) → kanala yönlendir
       if (isDM && !lower.startsWith("*")) {
-        console.log(`DM from admin: ${content}`);
         const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
         if (targetChannel?.isTextBased()) await targetChannel.send(content);
         return;
       }
     }
 
-    // Admin olmayan DM'leri yoksay
     if (isDM) return;
 
-    // === HAFIZA GÜNCELLEME (seed kanalı) ===
-    if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
-      if (!containsReligiousAbuse(content)) {
-        const username = message.author.username || "biri";
-        const entry = `${username}: ${content}`;
-        const last = memory[memory.length - 1];
+    /* === HAFIZA GÜNCELLEME === */
+    if (message.channel.id === SEED_CHANNEL_ID && content.length > 0 && !containsReligiousAbuse(content)) {
+      const username = message.author.username || "biri";
+      const entry    = `${username}: ${content}`;
+      const last     = memory[memory.length - 1];
 
-        // Aynı kişinin ardışık mesajlarını birleştir
-        if (last && last.startsWith(username + ": ")) {
-          memory[memory.length - 1] = last + " " + content;
-          memorySet.add(normalizeText(memory[memory.length - 1]));
-        } else {
-          memory.push(entry);
-          memorySet.add(normalizeText(entry));
-        }
-
-        if (memory.length > MAX_MEMORY_MESSAGES) {
-          const removed = memory.shift();
-          memorySet.delete(normalizeText(removed));
-        }
+      if (last && last.startsWith(username + ": ")) {
+        memory[memory.length - 1] = last + " " + content;
+        memorySet.add(normalizeText(memory[memory.length - 1]));
+      } else {
+        addToMemory(entry);
       }
     }
 
-    // === @MENTION CEVAP ===
-    if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
-      const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
+    /* === @MENTION === */
+    if (message.mentions.has(client.user) && Math.random() < MENTION_CHANCE) {
+      const cleanContent  = content.replace(/<@!?\d+>/g, "").trim();
       const recentHistory = await fetchRecentHistory(message.channel, 10);
       const out = await askAI(cleanContent || "ne düşünüyorsun", false, recentHistory) || randomSentence();
       rememberBotOutput(out);
-      await message.reply(out);
+      await sendReply(message, out, message.channel);
       return;
     }
 
-    // === BOT MESAJINA REPLY ===
+    /* === BOT MESAJINA REPLY === */
     if (
       message.reference &&
       message.mentions.repliedUser?.id === client.user.id &&
-      Math.random() < REPLY_RESPONSE_CHANCE
+      Math.random() < REPLY_CHANCE
     ) {
       const recentHistory = await fetchRecentHistory(message.channel, 10);
       const out = await askAI(content, false, recentHistory) || randomSentence();
       rememberBotOutput(out);
-      await message.reply(out);
+      await sendReply(message, out, message.channel);
       return;
     }
 
-    // === RASTGELE MESAJ ===
+    /* === RASTGELE MESAJ === */
     messageCounter++;
     if (messageCounter >= nextMessageTarget) {
-      messageCounter = 0;
-      nextMessageTarget = Math.floor(Math.random() * 31) + 20;
+      messageCounter    = 0;
+      nextMessageTarget = randInt(20, 51);
 
       const recentHistory = await fetchRecentHistory(message.channel, 10);
-      const lastMsg = content || null;
-      const out = await askAI(lastMsg, true, recentHistory) || randomSentence();
+      const out = await askAI(content || null, true, recentHistory) || randomSentence();
       rememberBotOutput(out);
-      await message.channel.send(out);
+      await sendReply(null, out, message.channel);
     }
 
-    // === REACTION ===
-    if (!reactionsEnabled) return;
-    if (message.author.id !== TARGET_USER_ID) return;
-
-    const has1 = message.reactions.cache.some((r) => r.emoji.name === EMOJI_1);
-    const has2 = message.reactions.cache.some((r) => r.emoji.name === EMOJI_2);
-    if (!has1) await message.react(EMOJI_1);
-    if (!has2) await message.react(EMOJI_2);
+    /* === REACTION === */
+    if (!reactionsEnabled || message.author.id !== TARGET_USER_ID) return;
+    if (!message.reactions.cache.some(r => r.emoji.name === EMOJI_1)) await message.react(EMOJI_1);
+    if (!message.reactions.cache.some(r => r.emoji.name === EMOJI_2)) await message.react(EMOJI_2);
 
   } catch (e) {
     console.error(e);
   }
 });
 
-/* =========================
-   LOGIN
-========================= */
-console.log("Discord login başlıyor... token var mı?", Boolean(process.env.DISCORD_TOKEN));
+/* ── LOGIN ────────────────────────────────────────── */
+console.log("Discord login başlıyor... token:", Boolean(process.env.DISCORD_TOKEN));
 
-client.on("error",   (e) => console.error("Discord error:",  e));
-client.on("shardError", (e) => console.error("Shard error:", e));
-process.on("unhandledRejection", (e) => console.error("UnhandledRejection:", e));
-process.on("uncaughtException",  (e) => console.error("UncaughtException:",  e));
+client.on("error",      e => console.error("Discord error:",  e));
+client.on("shardError", e => console.error("Shard error:",    e));
+process.on("unhandledRejection", e => console.error("UnhandledRejection:", e));
+process.on("uncaughtException",  e => console.error("UncaughtException:",  e));
 
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log("Discord login OK"))
-  .catch((e) => console.error("Discord login FAIL:", e));
+  .catch(e  => console.error("Discord login FAIL:", e));
