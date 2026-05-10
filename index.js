@@ -480,10 +480,10 @@ function randomWord() {
 function generateMarkov() {
   if (markovStarts.length === 0) return null;
 
-  // Rastgele uzunluk: 1-14 kelime, kısa mesajlara daha fazla ağırlık
+  // Rastgele uzunluk: minimum 3, çoğunlukla 4-10 kelime
   const maxWords = Math.random() < 0.4
-    ? Math.floor(Math.random() * 3) + 1   // %40: 1-3 kelime
-    : Math.floor(Math.random() * 9) + 3;  // %60: 3-11 kelime
+    ? Math.floor(Math.random() * 3) + 3   // %40: 3-5 kelime
+    : Math.floor(Math.random() * 7) + 4;  // %60: 4-10 kelime
 
   // Kaos faktörü: %35 ihtimalle bigram zinciri yerine rastgele kelime ata
   const CHAOS = 0.35;
@@ -508,10 +508,8 @@ function generateMarkov() {
       }
     }
 
-    // maxWords=1 durumunda sadece 1 kelime üret
-    const output = maxWords === 1 ? [randomWord()] : words;
-    if (output.length >= 1) {
-      const text = output.join(" ");
+    if (words.length >= 3) {
+      const text = words.join(" ");
       if (!containsReligiousAbuse(text)) return text;
     }
   }
