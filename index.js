@@ -41,6 +41,7 @@ const ROBLOX_USER_ID = "2575829815";
 // Gemini
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
+let geminiFileUri = null;
 
 /* =========================
    SEED DURUMU
@@ -187,16 +188,10 @@ function buildRandomSamples(n = 30) {
   return shuffled.slice(0, n).join("\n");
 }
 
-async function askGemini(userMessage = null, isRandom = false, recentHistory = []) {
-  if (!GEMINI_API_KEY) return null;
-
-  const contextSamples = buildContextSamples(40);
-  const randomSamples  = buildRandomSamples(20);
-
-  const systemInstruction = `Sen bu Discord sunucusunun eski bir üyesisin. Adın yok, yapay zeka olduğunu asla söylemezsin.
+const SYSTEM_INSTRUCTION = `Sen bu Discord sunucusunun eski bir üyesisin. Adın yok, yapay zeka olduğunu asla söylemezsin.
 
 KONUŞMA TARZI:
-- Cevaplar genelde 1-5 kelime. Çoğu zaman tek kelime yeterli: "he", "yok", "bilmem", "ya", "amk", "neyse"
+- Cevaplar genelde 1-5 kelime. Çoğu zaman tek kelime yeterli: "he", "yok", "ya", "amk", "neyse"
 - "he" = evet. "yok" = hayır. Bunları kullan.
 - Soru sorulduğunda kesinlikle "bilmem", "ne bileyim", "bilmiyorum", "ne bilim" yazma. Bunun yerine uydur, tahmin et, bir sayı söyle, bir şey söyle. Yanlış olsan da önemli değil, direkt cevap ver.
 - Argo dolu konuş: "amk", "aq", "knk", "ya", "lan", "olm", "oe", "la", "nt", "valla", "kanka", "abi", "bro"
@@ -219,7 +214,7 @@ ASLA YAPMA:
 - Soru sorma
 - 2 cümleden fazla yazma
 
-BİRİNİ TANIMIYORSAN: "bilmem", "kim o", "tanımam", "yok" gibi kısa de. Asla uzun cümle kurma.
+BİRİNİ TANIMIYORSAN: "kim o", "tanımam", "yok" gibi kısa de. Asla uzun cümle kurma.
 
 SUNUCUYA ÖZEL:
 - Oyun konuları (TFT, CS, LoL, Roblox) normaldir, dalga geç ya da kısa yorum yap
@@ -314,13 +309,10 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — zaten duyuyom
 
 — zeitnot iyi mi
-— sorulur mu
+— sorulur mu`;
 
-SUNUCUDAN RASTGELE MESAJLAR (bu tarzı öğren):
-${randomSamples || "(yok)"}
-
-SON MESAJLAR (bağlamı anlamak için):
-${contextSamples || "(yok)"}`;
+async function askGemini(userMessage = null, isRandom = false, recentHistory = []) {
+  if (!GEMINI_API_KEY) return null;
 
   const recentBlock = buildRecentBlock(recentHistory);
 
@@ -335,9 +327,26 @@ ${contextSamples || "(yok)"}`;
       : userMessage || "naber";
   }
 
+  let contentParts;
+  if (geminiFileUri) {
+    contentParts = [
+      { fileData: { mimeType: "text/plain", fileUri: geminiFileUri } },
+      { text: `Yukarıdaki dosya bu sunucudan alınan gerçek konuşmalardır. Bu tarzı ve dili tam olarak benimse.\n\n${prompt}` },
+    ];
+  } else {
+    const contextSamples = buildContextSamples(40);
+    const randomSamples  = buildRandomSamples(20);
+    const fallbackBlock = [
+      randomSamples ? `SUNUCUDAN RASTGELE MESAJLAR (bu tarzı öğren):\n${randomSamples}` : "",
+      contextSamples ? `SON MESAJLAR (bağlamı anlamak için):\n${contextSamples}` : "",
+      prompt,
+    ].filter(Boolean).join("\n\n");
+    contentParts = [{ text: fallbackBlock }];
+  }
+
   const body = {
-    system_instruction: { parts: [{ text: systemInstruction }] },
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+    contents: [{ role: "user", parts: contentParts }],
     generationConfig: {
       maxOutputTokens: 120,
       temperature: 1.4,
@@ -388,6 +397,43 @@ ${contextSamples || "(yok)"}`;
   } catch (e) {
     console.error("[GEMINI] Error:", e?.name, e?.message?.slice(0, 100));
     return null;
+  }
+}
+
+/* =========================
+   GEMINI FILE UPLOAD
+========================= */
+async function uploadSeedToGemini() {
+  if (!GEMINI_API_KEY || memory.length === 0) return;
+
+  const fileContent = memory.join("\n");
+  const boundary = "gcboundary";
+  const metadata = JSON.stringify({ file: { display_name: "discord_seed" } });
+  const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: text/plain\r\n\r\n${fileContent}\r\n--${boundary}--`;
+
+  try {
+    const res = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}&uploadType=multipart`,
+      {
+        method: "POST",
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        body,
+      },
+      60000
+    );
+
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      console.error("[GEMINI FILES] Upload başarısız:", res.status, err.slice(0, 300));
+      return;
+    }
+
+    const data = await res.json();
+    geminiFileUri = data?.file?.uri || null;
+    const kb = (fileContent.length / 1024).toFixed(1);
+    console.log(`[GEMINI FILES] Seed yüklendi: ${geminiFileUri} (${memory.length} satır, ${kb} KB)`);
+  } catch (e) {
+    console.error("[GEMINI FILES] Upload error:", e?.name, e?.message?.slice(0, 100));
   }
 }
 
@@ -830,6 +876,7 @@ async function onClientReady() {
     if (!ch || !ch.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
     console.log(`Seed: Kanal bulundu -> #${ch.name}`);
     await seedByDays(ch, SEED_DAYS, SEED_MAX);
+    await uploadSeedToGemini();
   } catch (e) {
     console.error("Seed error:", e);
   }
