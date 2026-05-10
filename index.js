@@ -13,7 +13,7 @@ const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const SEED_CHANNEL_ID = "705537838770421761";
 
 const SEED_DAYS = 240;
-const SEED_MAX = 40000;
+const SEED_MAX = 150000;
 
 const MAX_MEMORY_MESSAGES = 40000;
 const RECENT_EXCLUDE = 100;
@@ -436,6 +436,60 @@ async function uploadSeedToGemini() {
   } catch (e) {
     console.error("[GEMINI FILES] Upload error:", e?.name, e?.message?.slice(0, 100));
   }
+}
+
+/* =========================
+   MARKOV ZİNCİRİ
+========================= */
+const markovChain = new Map(); // "w1 w2" -> [w3, w3, ...]
+const markovStarts = [];
+
+function buildMarkov() {
+  markovChain.clear();
+  markovStarts.length = 0;
+
+  for (const entry of memory) {
+    const colonIdx = entry.indexOf(": ");
+    if (colonIdx === -1) continue;
+    const msg = entry.slice(colonIdx + 2).trim();
+    if (!msg || containsReligiousAbuse(msg)) continue;
+
+    const words = msg.split(/\s+/).filter(w => w.length > 0);
+    if (words.length < 2) continue;
+
+    markovStarts.push(`${words[0]} ${words[1]}`);
+
+    for (let i = 0; i < words.length - 2; i++) {
+      const key = `${words[i]} ${words[i + 1]}`;
+      if (!markovChain.has(key)) markovChain.set(key, []);
+      markovChain.get(key).push(words[i + 2]);
+    }
+  }
+
+  console.log(`[MARKOV] Model hazır: ${markovChain.size} bigram, ${markovStarts.length} başlangıç`);
+}
+
+function generateMarkov(maxWords = 12) {
+  if (markovStarts.length === 0) return null;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const start = markovStarts[Math.floor(Math.random() * markovStarts.length)];
+    const words = start.split(" ");
+
+    for (let i = 0; i < maxWords - 2; i++) {
+      const key = `${words[words.length - 2]} ${words[words.length - 1]}`;
+      const nexts = markovChain.get(key);
+      if (!nexts || nexts.length === 0) break;
+      words.push(nexts[Math.floor(Math.random() * nexts.length)]);
+    }
+
+    if (words.length >= 2) {
+      const text = words.join(" ");
+      if (!containsReligiousAbuse(text)) return text;
+    }
+  }
+
+  return null;
 }
 
 /* =========================
@@ -886,6 +940,7 @@ async function onClientReady() {
     if (!ch || !ch.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
     console.log(`Seed: Kanal bulundu -> #${ch.name}`);
     await seedByDays(ch, SEED_DAYS, SEED_MAX);
+    buildMarkov();
     await uploadSeedToGemini();
   } catch (e) {
     console.error("Seed error:", e);
@@ -1015,6 +1070,7 @@ client.on("messageCreate", async (message) => {
           "`*reaction on/off/status`",
           "`*seed status`",
           "`*gemini test`",
+          "`*ai [mesaj]` — yapay zeka cevabı",
           "`*gökhan`",
           "`*gökhanraw`",
           "`*yardim`",
@@ -1031,6 +1087,15 @@ client.on("messageCreate", async (message) => {
     }
 
     if (isDM) return;
+
+    // === *AI KOMUTU (herkese açık) ===
+    if (lower.startsWith("*ai")) {
+      const query = content.slice(3).trim();
+      const recentHistory = await fetchRecentHistory(message.channel, 8);
+      const out = await askGemini(query || "naber", false, recentHistory) || randomSentence();
+      await message.reply(out);
+      return;
+    }
 
     // === HAFIZA GÜNCELLEME ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
@@ -1083,14 +1148,13 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // === RASTGELE MESAJ ===
+    // === RASTGELE MESAJ (Markov) ===
     messageCounter++;
     if (messageCounter >= nextMessageTarget) {
       messageCounter = 0;
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
 
-      const recentHistory = await fetchRecentHistory(message.channel, 8);
-      const out = await askGemini(null, true, recentHistory) || randomSentence();
+      const out = generateMarkov() || randomSentence();
       await message.channel.send(out);
     }
 
