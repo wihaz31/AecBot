@@ -176,7 +176,7 @@ async function fetchRecentHistory(channel, limit = 8) {
 
 function buildRecentBlock(recentHistory) {
   return recentHistory
-    .map(h => `${h.isBot ? "Sen" : h.username}: ${h.content}`)
+    .map(h => `${h.isBot ? "bot" : h.username}: ${h.content}`)
     .join("\n");
 }
 
@@ -213,6 +213,7 @@ ASLA YAPMA:
 - Dini hakaret ve ırkçılık
 - Soru sorma
 - 2 cümleden fazla yazma
+- Liste yazmak, "bot:" veya "Sen:" ile başlayan satırlar yazmak
 
 BİRİNİ TANIMIYORSAN: "kim o", "tanımam", "yok" gibi kısa de. Asla uzun cümle kurma.
 
@@ -331,7 +332,7 @@ async function askGemini(userMessage = null, isRandom = false, recentHistory = [
   if (geminiFileUri) {
     contentParts = [
       { fileData: { mimeType: "text/plain", fileUri: geminiFileUri } },
-      { text: `Yukarıdaki dosya bu sunucudan alınan gerçek konuşmalardır. Bu tarzı ve dili tam olarak benimse.\n\n${prompt}` },
+      { text: `Yukarıdaki dosya sunucu geçmişidir, sadece tarzı öğrenmek için bak.\n\n${prompt}\n\n(Tek kısa cevap yaz, liste veya "bot:" satırı yazma)` },
     ];
   } else {
     const contextSamples = buildContextSamples(40);
@@ -496,6 +497,12 @@ function isCorrectHint(text) {
     || t.includes("buldun") || t.includes("dogru") || t.includes("buldu");
 }
 
+function isWrongHint(text) {
+  const t = foldTR(text.replace(/<@!?\d+>/g, "").trim());
+  return /^(yog|yok|degil|yanlis|hayir|no|nope|olmadi|degildi)$/.test(t)
+    || t === "yog" || t === "degil" || t === "yanlis";
+}
+
 function isQuitGame(text) {
   const t = foldTR(text);
   return /\b(iptal|dur|bitir|vazgec|cik|quit|stop|cancel)\b/.test(t);
@@ -524,6 +531,9 @@ async function handleGuessGame(message, content) {
       game.low = game.lastGuess + 1;
     } else if (isLowerHint(content)) {
       game.high = game.lastGuess - 1;
+    } else if (isWrongHint(content)) {
+      await message.reply("büyük mü küçük mü");
+      return true;
     } else {
       return false;
     }
