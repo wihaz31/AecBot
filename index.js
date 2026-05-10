@@ -383,7 +383,7 @@ async function askGemini(userMessage, isRandom, recentHistory) {
   contents.push({ role: "user", parts: [{ text: userPrompt }] });
 
   const body = {
-    system_instruction: { parts: [{ text: systemText }] },
+    systemInstruction: { parts: [{ text: systemText }] },
     contents,
     generationConfig: { maxOutputTokens: 80, temperature: 1.0, topP: 0.92 },
     safetySettings: [
