@@ -605,7 +605,15 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       const t = (m.content || "").trim();
       if (!t) continue;
       if (containsReligiousAbuse(t)) continue;
-      collected.push(t);
+
+      const username = m.author.username || "biri";
+      const last = collected[collected.length - 1];
+      if (last && last.startsWith(username + ": ")) {
+        collected[collected.length - 1] = last + " " + t;
+      } else {
+        collected.push(`${username}: ${t}`);
+      }
+
       if (collected.length >= maxMessages) break;
     }
 
@@ -805,11 +813,19 @@ client.on("messageCreate", async (message) => {
     // === HAFIZA GÜNCELLEME ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
       if (!containsReligiousAbuse(content)) {
-        memory.push(content);
-        memorySet.add(normalizeText(content));
-        if (memory.length > MAX_MEMORY_MESSAGES) {
-          const removed = memory.shift();
-          memorySet.delete(normalizeText(removed));
+        const username = message.author.username || "biri";
+        const entry = `${username}: ${content}`;
+        const last = memory[memory.length - 1];
+        if (last && last.startsWith(username + ": ")) {
+          memory[memory.length - 1] = last + " " + content;
+          memorySet.add(normalizeText(memory[memory.length - 1]));
+        } else {
+          memory.push(entry);
+          memorySet.add(normalizeText(entry));
+          if (memory.length > MAX_MEMORY_MESSAGES) {
+            const removed = memory.shift();
+            memorySet.delete(normalizeText(removed));
+          }
         }
       }
     }
