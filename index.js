@@ -25,7 +25,7 @@ const ROBLOX_USER_ID  = "2575829815";
 const GROQ_API_KEY    = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL      = "llama-3.3-70b-versatile";
 const GEMINI_API_KEY  = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL    = "gemini-1.5-flash";
+const GEMINI_MODEL    = "gemini-2.5-flash-lite-preview-06-17";
 const RETRY_DELAYS    = [2000, 4000];
 
 let reactionsEnabled  = false;
