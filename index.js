@@ -25,7 +25,7 @@ const ROBLOX_USER_ID  = "2575829815";
 const GROQ_API_KEY    = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL      = "llama-3.3-70b-versatile";
 const GEMINI_API_KEY  = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL    = "gemini-2.0-flash";
+const GEMINI_MODEL    = "gemini-1.5-flash";
 const RETRY_DELAYS    = [2000, 4000];
 
 let reactionsEnabled  = false;
@@ -413,7 +413,17 @@ async function askGemini(userMessage, isRandom, recentHistory) {
         return null;
       }
 
-      const raw = (await res.json())?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const json = await res.json();
+      const candidate = json?.candidates?.[0];
+      if (!candidate) {
+        console.warn("[GEMINI] candidate yok, finishReason:", json?.candidates, "promptFeedback:", JSON.stringify(json?.promptFeedback)?.slice(0, 100));
+        return null;
+      }
+      if (candidate.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
+        console.warn("[GEMINI] finishReason:", candidate.finishReason);
+        return null;
+      }
+      const raw = candidate?.content?.parts?.[0]?.text?.trim();
       if (!raw || containsReligiousAbuse(raw)) return null;
       const cleaned = cleanAIOutput(raw);
       if (!cleaned || isRefusal(cleaned)) return null;
@@ -436,7 +446,7 @@ async function askGemini(userMessage, isRandom, recentHistory) {
 async function askGroq(userMessage, isRandom, recentHistory) {
   if (!GROQ_API_KEY) return null;
 
-  const systemText   = buildSystemPrompt(getRandomFewShot(6), buildContextSamples(80));
+  const systemText   = buildSystemPrompt(getRandomFewShot(10), buildContextSamples(300));
   const userPrompt   = buildUserPrompt(userMessage, isRandom, recentHistory);
   const historyBlock = buildHistoryBlock(recentHistory);
 
