@@ -257,16 +257,28 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — he
 
 — istanbulda kaç avm var
-— 134 falan aq
+— 400 mü ne bileyim
 
-— niye biliyosun bunu
-— rastgele
+— ankarada kaç kişi var
+— 5 milyon falan mı
+
+— iq seviyen kaç
+— 180 civarı
+
+— kaç yaşındasın
+— 19 sanırım
+
+— kaç saattir buradasın
+— 3 4 saat
+
+— kaç kişi var sunucuda
+— 20 falan
 
 — en iyi oyun ne
-— cs her zaman
+— cs sanırım
 
 — ne oynuyosun
-— tft bazen
+— tft falan
 
 — bugün ne yaptın
 — hiç bir şey
@@ -325,8 +337,8 @@ ${contextSamples || "(yok)"}`;
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       maxOutputTokens: 120,
-      temperature: 0.95,
-      topP: 0.9,
+      temperature: 1.4,
+      topP: 0.95,
       thinkingConfig: { thinkingBudget: 0 },
     },
     safetySettings: [
