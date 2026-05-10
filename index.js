@@ -197,10 +197,12 @@ async function askGemini(userMessage = null, isRandom = false, recentHistory = [
 
 KONUŞMA TARZI:
 - Cevaplar genelde 1-5 kelime. Çoğu zaman tek kelime yeterli: "he", "yok", "bilmem", "ya", "amk", "neyse"
-- "he" = evet. "yok" = hayır veya bilmiyorum. Bunları kullan.
+- "he" = evet. "yok" = hayır. Bunları kullan.
+- Soru sorulduğunda kesinlikle "bilmem", "ne bileyim", "bilmiyorum", "ne bilim" yazma. Bunun yerine uydur, tahmin et, bir sayı söyle, bir şey söyle. Yanlış olsan da önemli değil, direkt cevap ver.
 - Argo dolu konuş: "amk", "aq", "knk", "ya", "lan", "olm", "oe", "la", "nt", "valla", "kanka", "abi", "bro"
 - Bazen büyük harfle kısa bir şey yazarsın, ama uzun caps spam yazmak sana ait değil
 - Anlamsız karakter dizisine (ASDPOFK, asdfgh gibi) sadece "ne" veya "ne diyosun" de, ya da tamamen yoksay
+- Sayı veya bilgi sorulan her soruya tahmini bir sayı ya da kısa bir şey söyle, asla "bilmem" yazma
 - Küfür doğal ve sık kullanılır, ama dini hakaret kesinlikle yok
 - Bazen tamamen konudan kopuk bir şey söylersin
 - Bazen sadece "amk" veya "ya" yazarsın, bu yeterlidir
@@ -212,6 +214,7 @@ ASLA YAPMA:
 - "Ben sadece...", "Ben bu sunucunun..." — bu kalıpları yazma
 - "Bu konuşmalara göre...", "Şöyle cevap verebilirim...", "Bu durumda..." — meta yorum yazma, direkt cevap ver
 - Yapay zeka veya bot olduğunu ima etme
+- "bilmem", "ne bileyim", "bilmiyorum", "ne bilim", "fikrim yok" — kesinlikle yazma, her zaman bir şey söyle
 - Dini hakaret ve ırkçılık
 - Soru sorma
 - 2 cümleden fazla yazma
@@ -257,10 +260,10 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — he
 
 — istanbulda kaç avm var
-— 400 mü ne bileyim
+— 150 falan
 
 — ankarada kaç kişi var
-— 5 milyon falan mı
+— 5 milyon falan
 
 — iq seviyen kaç
 — 180 civarı
@@ -400,6 +403,135 @@ function randomSentence() {
   const words = [];
   for (let i = 0; i < len; i++) words.push(randomFrom(WORD_POOL));
   return words.join(" ");
+}
+
+/* =========================
+   SAYI TAHMİN OYUNU
+========================= */
+// key: `${channelId}-${userId}`, phase: 'asking_range' | 'guessing'
+const guessGames = new Map();
+
+function parseRange(text) {
+  const clean = text.replace(/<@!?\d+>/g, "").trim();
+  const patterns = [
+    /(\d+)\s*[-–]\s*(\d+)/,
+    /(\d+)\s+ile\s+(\d+)/i,
+    /(\d+)[''´]?\s*den\s+(\d+)/i,
+    /(\d+)\s+ila\s+(\d+)/i,
+  ];
+  for (const p of patterns) {
+    const m = clean.match(p);
+    if (m) {
+      const a = parseInt(m[1]), b = parseInt(m[2]);
+      if (!isNaN(a) && !isNaN(b) && a !== b) return { min: Math.min(a, b), max: Math.max(a, b) };
+    }
+  }
+  return null;
+}
+
+function isStartGameText(text) {
+  const t = foldTR(text.replace(/<@!?\d+>/g, ""));
+  return /sayi\s*tut|aklindan.*sayi|sayi.*oyun|tahmin.*sayi|sayi.*tahmin|sayi\s*bil/.test(t);
+}
+
+function isHigherHint(text) {
+  const t = foldTR(text);
+  return /\b(buyuk|fazla|yuksek|yukari|yukarda|daha (buyuk|fazla|yuksek)|up|higher)\b/.test(t);
+}
+
+function isLowerHint(text) {
+  const t = foldTR(text);
+  return /\b(kucuk|az|dusuk|asagi|asagida|daha (kucuk|az|dusuk)|down|lower)\b/.test(t);
+}
+
+function isCorrectHint(text) {
+  const t = foldTR(text.replace(/<@!?\d+>/g, "").trim());
+  return /^(buldun|buldu|dogru|evet|he|tamam|yes|bingo|aynen|kesin)$/.test(t)
+    || t.includes("buldun") || t.includes("dogru") || t.includes("buldu");
+}
+
+function isQuitGame(text) {
+  const t = foldTR(text);
+  return /\b(iptal|dur|bitir|vazgec|cik|quit|stop|cancel)\b/.test(t);
+}
+
+async function handleGuessGame(message, content) {
+  const gameKey = `${message.channelId}-${message.author.id}`;
+  const game = guessGames.get(gameKey);
+
+  // Active guessing phase
+  if (game && game.phase === "guessing") {
+    if (isQuitGame(content)) {
+      guessGames.delete(gameKey);
+      await message.reply(`tamam bıraktım. sayı ${game.lastGuess} miydi`);
+      return true;
+    }
+
+    if (isCorrectHint(content)) {
+      const attempts = game.attempts;
+      guessGames.delete(gameKey);
+      await message.reply(`hehe ${attempts} tahminde buldum`);
+      return true;
+    }
+
+    if (isHigherHint(content)) {
+      game.low = game.lastGuess + 1;
+    } else if (isLowerHint(content)) {
+      game.high = game.lastGuess - 1;
+    } else {
+      return false;
+    }
+
+    if (game.low > game.high) {
+      guessGames.delete(gameKey);
+      await message.reply("yalan mı söyledin amk bunun sonu yok");
+      return true;
+    }
+
+    game.lastGuess = Math.floor((game.low + game.high) / 2);
+    game.attempts++;
+
+    const reply = game.low === game.high ? `${game.lastGuess} kesin bu` : `${game.lastGuess} mi`;
+    await message.reply(reply);
+    return true;
+  }
+
+  // Waiting for range
+  if (game && game.phase === "asking_range") {
+    const range = parseRange(content);
+    if (range) {
+      const guess = Math.floor((range.min + range.max) / 2);
+      guessGames.set(gameKey, { phase: "guessing", low: range.min, high: range.max, lastGuess: guess, attempts: 1 });
+      await message.reply(`${guess} mi`);
+      return true;
+    }
+    return false;
+  }
+
+  // No active game — check if message starts one
+  const cleanText = foldTR(content.replace(/<@!?\d+>/g, ""));
+  const range = parseRange(content);
+
+  if (range && (cleanText.includes("sayi") || cleanText.includes("tut") || cleanText.includes("tahmin"))) {
+    const guess = Math.floor((range.min + range.max) / 2);
+    guessGames.set(gameKey, { phase: "guessing", low: range.min, high: range.max, lastGuess: guess, attempts: 1 });
+    await message.reply(`${guess} mi`);
+    return true;
+  }
+
+  if (isStartGameText(content)) {
+    if (range) {
+      const guess = Math.floor((range.min + range.max) / 2);
+      guessGames.set(gameKey, { phase: "guessing", low: range.min, high: range.max, lastGuess: guess, attempts: 1 });
+      await message.reply(`${guess} mi`);
+    } else {
+      guessGames.set(gameKey, { phase: "asking_range" });
+      await message.reply("hangi aralıkta");
+    }
+    return true;
+  }
+
+  return false;
 }
 
 /* =========================
@@ -865,6 +997,8 @@ client.on("messageCreate", async (message) => {
 
     // === @MENTION CEVAP ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
+      if (await handleGuessGame(message, content)) return;
+
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
@@ -881,6 +1015,8 @@ client.on("messageCreate", async (message) => {
       message.mentions.repliedUser?.id === client.user.id &&
       Math.random() < REPLY_RESPONSE_CHANCE
     ) {
+      if (await handleGuessGame(message, content)) return;
+
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
