@@ -12,7 +12,7 @@ const { Client, GatewayIntentBits, Partials } = require("discord.js");
 ========================= */
 const SEED_CHANNEL_ID = "705537838770421761";
 
-const SEED_DAYS = 240;
+const SEED_DAYS = 1500;
 const SEED_MAX = 150000;
 
 const MAX_MEMORY_MESSAGES = 40000;
@@ -509,7 +509,6 @@ function randomSentence() {
 /* =========================
    SAYI TAHMİN OYUNU
 ========================= */
-// key: `${channelId}-${userId}`, phase: 'asking_range' | 'guessing'
 const guessGames = new Map();
 
 function parseRange(text) {
@@ -566,21 +565,18 @@ async function handleGuessGame(message, content) {
   const gameKey = `${message.channelId}-${message.author.id}`;
   const game = guessGames.get(gameKey);
 
-  // Active guessing phase
   if (game && game.phase === "guessing") {
     if (isQuitGame(content)) {
       guessGames.delete(gameKey);
       await message.reply(`tamam bıraktım. sayı ${game.lastGuess} miydi`);
       return true;
     }
-
     if (isCorrectHint(content)) {
       const attempts = game.attempts;
       guessGames.delete(gameKey);
       await message.reply(`hehe ${attempts} tahminde buldum`);
       return true;
     }
-
     if (isHigherHint(content)) {
       game.low = game.lastGuess + 1;
     } else if (isLowerHint(content)) {
@@ -591,22 +587,17 @@ async function handleGuessGame(message, content) {
     } else {
       return false;
     }
-
     if (game.low > game.high) {
       guessGames.delete(gameKey);
       await message.reply("yalan mı söyledin amk bunun sonu yok");
       return true;
     }
-
     game.lastGuess = Math.floor((game.low + game.high) / 2);
     game.attempts++;
-
-    const reply = game.low === game.high ? `${game.lastGuess} kesin bu` : `${game.lastGuess} mi`;
-    await message.reply(reply);
+    await message.reply(game.low === game.high ? `${game.lastGuess} kesin bu` : `${game.lastGuess} mi`);
     return true;
   }
 
-  // Waiting for range
   if (game && game.phase === "asking_range") {
     const range = parseRange(content);
     if (range) {
@@ -618,7 +609,6 @@ async function handleGuessGame(message, content) {
     return false;
   }
 
-  // No active game — check if message starts one
   const cleanText = foldTR(content.replace(/<@!?\d+>/g, ""));
   const range = parseRange(content);
 
@@ -652,23 +642,16 @@ function handleSimpleChoiceQuestion(text) {
   if (!cleanText) return null;
 
   const match = cleanText.match(/(.+?)\s+(m[ıiuü])\s+(.+?)\s+(m[ıiuü])/i);
-  if (match) {
-    return Math.random() < 0.5 ? match[1].trim() : match[3].trim();
-  }
+  if (match) return Math.random() < 0.5 ? match[1].trim() : match[3].trim();
 
   const match2 = cleanText.match(/(.+?)\s+yoksa\s+(.+?)\s*[?]*$/i);
-  if (match2) {
-    return Math.random() < 0.5 ? match2[1].trim() : match2[2].trim();
-  }
+  if (match2) return Math.random() < 0.5 ? match2[1].trim() : match2[2].trim();
 
   const match3 = cleanText.match(/(.+?)\s+veya\s+(.+?)\s*[?]*$/i);
-  if (match3) {
-    return Math.random() < 0.5 ? match3[1].trim() : match3[2].trim();
-  }
+  if (match3) return Math.random() < 0.5 ? match3[1].trim() : match3[2].trim();
 
-  if (cleanText.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i)) {
+  if (cleanText.match(/evet\s+(m[ıiuü])\s+hayır\s+(m[ıiuü])/i))
     return Math.random() < 0.5 ? "evet" : "hayır";
-  }
 
   return null;
 }
@@ -685,22 +668,14 @@ async function fetchRobloxPlaceName(placeId) {
   const key = String(placeId);
   const cached = placeNameCache.get(key);
   if (cached && cached.exp > Date.now()) return cached.name;
-
   try {
-    const r = await fetchWithTimeout(
-      `https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`,
-      {},
-      12000
-    );
+    const r = await fetchWithTimeout(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${Number(placeId)}`, {}, 12000);
     if (!r.ok) return null;
     const arr = await r.json();
     const name = arr?.[0]?.name || null;
     placeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
-  } catch (e) {
-    console.error("Roblox place name error:", e?.name);
-    return null;
-  }
+  } catch (e) { console.error("Roblox place name error:", e?.name); return null; }
 }
 
 async function fetchRobloxUniverseName(universeId) {
@@ -708,78 +683,48 @@ async function fetchRobloxUniverseName(universeId) {
   const key = String(universeId);
   const cached = universeNameCache.get(key);
   if (cached && cached.exp > Date.now()) return cached.name;
-
   try {
-    const r = await fetchWithTimeout(
-      `https://games.roblox.com/v1/games?universeIds=${Number(universeId)}`,
-      {},
-      12000
-    );
+    const r = await fetchWithTimeout(`https://games.roblox.com/v1/games?universeIds=${Number(universeId)}`, {}, 12000);
     if (!r.ok) return null;
     const data = await r.json();
     const name = data?.data?.[0]?.name || null;
     universeNameCache.set(key, { name, exp: Date.now() + ROBLOX_CACHE_MS });
     return name;
-  } catch (e) {
-    console.error("Roblox universe name error:", e?.name);
-    return null;
-  }
+  } catch (e) { console.error("Roblox universe name error:", e?.name); return null; }
 }
 
 async function fetchUniverseIdFromPlace(placeId) {
   if (!placeId) return null;
   try {
-    const r = await fetchWithTimeout(
-      `https://apis.roblox.com/universes/v1/places/${Number(placeId)}/universe`,
-      {},
-      12000
-    );
+    const r = await fetchWithTimeout(`https://apis.roblox.com/universes/v1/places/${Number(placeId)}/universe`, {}, 12000);
     if (!r.ok) return null;
     const data = await r.json();
     return data?.universeId || null;
-  } catch (e) {
-    console.error("Roblox universe-from-place error:", e?.name);
-    return null;
-  }
+  } catch (e) { console.error("Roblox universe-from-place error:", e?.name); return null; }
 }
 
 async function fetchRobloxStatus() {
   try {
     const r = await fetchWithTimeout(
       "https://presence.roblox.com/v1/presence/users",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }),
-      },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }) },
       12000
     );
-
     if (!r.ok) return null;
-
     const data = await r.json();
     const p = data?.userPresences?.[0];
     if (!p) return null;
-
     const presenceType = p.userPresenceType;
     const placeId = p.placeId || null;
     let universeId = p.universeId || null;
     const lastLocation = (p.lastLocation || "").trim() || null;
-
-    if (!universeId && placeId) {
-      universeId = await fetchUniverseIdFromPlace(placeId);
-    }
-
+    if (!universeId && placeId) universeId = await fetchUniverseIdFromPlace(placeId);
     let gameName = null;
     if (placeId) gameName = await fetchRobloxPlaceName(placeId);
     if (!gameName && universeId) gameName = await fetchRobloxUniverseName(universeId);
     if (!gameName && lastLocation) gameName = lastLocation;
-
     return { presenceType, placeId, universeId, lastLocation, gameName, raw: p };
-  } catch (e) {
-    console.error("Roblox status error:", e?.name);
-    return null;
-  }
+  } catch (e) { console.error("Roblox status error:", e?.name); return null; }
 }
 
 /* =========================
@@ -811,10 +756,7 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
   const beat = (tag, extra = "") => {
     const now = Date.now();
-    if (now - lastBeat >= 5000) {
-      lastBeat = now;
-      console.log(`[SEED] ${tag} fetch=${seedState.fetchCount} collected=${collected.length} ${extra}`);
-    }
+    if (now - lastBeat >= 5000) { lastBeat = now; console.log(`[SEED] ${tag} fetch=${seedState.fetchCount} collected=${collected.length} ${extra}`); }
   };
 
   const logProgress = (force = false) => {
@@ -822,8 +764,7 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
     if (!force && now - lastLogAt < 5000) return;
     lastLogAt = now;
     const elapsedMs = now - startedAt;
-    const elapsedSec = Math.max(1, Math.floor(elapsedMs / 1000));
-    const rate = Math.round(collected.length / elapsedSec);
+    const rate = Math.round(collected.length / Math.max(1, Math.floor(elapsedMs / 1000)));
     console.log(`Seed progress: ${collected.length}/${maxMessages} | fetch=${seedState.fetchCount} | ${formatDuration(elapsedMs)} | ~${rate} msg/sn`);
     seedState.collected = collected.length;
     seedState.lastUpdateAt = now;
@@ -833,11 +774,9 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
   while (collected.length < maxMessages) {
     await new Promise((r) => setImmediate(r));
-
     const batchSize = Math.min(100, maxMessages - collected.length);
     const opts = { limit: batchSize };
     if (beforeId) opts.before = beforeId;
-
     beat("before-fetch", `beforeId=${beforeId ?? "none"}`);
 
     let msgs;
@@ -848,17 +787,8 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       ]);
     } catch (e) {
       const retryAfter = e?.data?.retry_after ?? e?.retry_after ?? e?.rawError?.retry_after ?? null;
-      if (retryAfter) {
-        const waitMs = Math.ceil(Number(retryAfter) * 1000) + 750;
-        console.log(`[SEED] RATE LIMIT: ${retryAfter}s -> bekliyorum...`);
-        await sleep(waitMs);
-        continue;
-      }
-      if ((e?.message || "").includes("SEED_FETCH_TIMEOUT_20S")) {
-        console.log("[SEED] timeout, retry...");
-        await sleep(3000);
-        continue;
-      }
+      if (retryAfter) { await sleep(Math.ceil(Number(retryAfter) * 1000) + 750); continue; }
+      if ((e?.message || "").includes("SEED_FETCH_TIMEOUT_20S")) { await sleep(3000); continue; }
       seedState.error = e?.message || String(e);
       seedState.running = false;
       seedState.done = false;
@@ -868,7 +798,6 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
 
     seedState.fetchCount++;
     beat("after-fetch", `size=${msgs?.size ?? 0}`);
-
     if (!msgs || msgs.size === 0) break;
 
     const arr = Array.from(msgs.values()).reverse();
@@ -878,9 +807,7 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       if (m.createdTimestamp < cutoff) { reachedCutoff = true; break; }
       if (m.author.bot) continue;
       const t = (m.content || "").trim();
-      if (!t) continue;
-      if (containsReligiousAbuse(t)) continue;
-
+      if (!t || containsReligiousAbuse(t)) continue;
       const username = m.author.username || "biri";
       const last = collected[collected.length - 1];
       if (last && last.startsWith(username + ": ")) {
@@ -888,15 +815,12 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       } else {
         collected.push(`${username}: ${t}`);
       }
-
       if (collected.length >= maxMessages) break;
     }
 
     if (seedState.fetchCount % 10 === 0) logProgress(true);
     else logProgress(false);
-
     if (reachedCutoff) break;
-
     beforeId = msgs.last().id;
     await sleep(350);
   }
@@ -904,15 +828,12 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
   memory.length = 0;
   memory.push(...collected);
   while (memory.length > MAX_MEMORY_MESSAGES) memory.shift();
-
   memorySet.clear();
   for (const t of memory) memorySet.add(normalizeText(t));
-
   logProgress(true);
   seedState.running = false;
   seedState.done = true;
   seedState.error = null;
-
   console.log(`Seed tamam ✅ Hafıza: ${memory.length} mesaj (#${channel.name})`);
 }
 
@@ -931,10 +852,7 @@ const client = new Client({
 
 async function onClientReady() {
   console.log(`Bot aktif: ${client.user.tag}`);
-  if (!GEMINI_API_KEY) {
-    console.warn("[GEMINI] UYARI: GEMINI_API_KEY tanımlı değil! Fallback kullanılacak.");
-  }
-
+  if (!GEMINI_API_KEY) console.warn("[GEMINI] UYARI: GEMINI_API_KEY tanımlı değil! Fallback kullanılacak.");
   try {
     const ch = await client.channels.fetch(SEED_CHANNEL_ID);
     if (!ch || !ch.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
@@ -956,18 +874,13 @@ http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host}`);
     const path = u.pathname;
-
     if (path === "/") { res.writeHead(200); return res.end("OK"); }
-
     if (path === "/cmd") {
       const key = u.searchParams.get("key") || "";
       if (!CMD_KEY || key !== CMD_KEY) { res.writeHead(401); return res.end("unauthorized"); }
-
       const action = (u.searchParams.get("action") || "").toLowerCase();
-
       if (action === "reaction_off") { reactionsEnabled = false; res.writeHead(200); return res.end("ok"); }
       if (action === "reaction_on")  { reactionsEnabled = true;  res.writeHead(200); return res.end("ok"); }
-
       if (action === "say") {
         const text = u.searchParams.get("text") || "";
         if (!text.trim()) { res.writeHead(400); return res.end("missing text"); }
@@ -977,19 +890,14 @@ http.createServer(async (req, res) => {
         await ch.send(text);
         res.writeHead(200); return res.end("sent");
       }
-
       if (action === "seed_status") {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(seedState, null, 2));
       }
-
       res.writeHead(400); return res.end("unknown action");
     }
-
     res.writeHead(404); res.end("not found");
-  } catch (e) {
-    res.writeHead(500); res.end("error");
-  }
+  } catch (e) { res.writeHead(500); res.end("error"); }
 }).listen(PORT, () => console.log(`HTTP server on ${PORT}`));
 
 /* =========================
@@ -998,58 +906,44 @@ http.createServer(async (req, res) => {
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
-
     const content = (message.content || "").trim();
-
     const lower = content.toLowerCase();
     const isDM = message.guild === null;
     const isAdmin = message.author.id === ADMIN_USER_ID;
 
-    // === *gökhan (Roblox status) ===
     if (lower === "*gökhan" || lower === "*gokhan") {
       const status = await fetchRobloxStatus();
       if (!status) { await message.reply("Roblox durumu çekemedim."); return; }
-
       if (status.presenceType === 0) { await message.reply("offline."); return; }
       if (status.presenceType === 3) { await message.reply("Gökhan Studio'da nabıyon aq."); return; }
-
       if (status.presenceType === 2) {
-        let gameText = status.gameName;
-        if (!gameText) {
-          gameText = status.lastLocation ||
-            (status.placeId ? `placeId: ${status.placeId}` : null) ||
-            (status.universeId ? `universeId: ${status.universeId}` : null) ||
-            "Roblox oyun bilgisi yok (privacy kapalı olabilir)";
-        }
+        let gameText = status.gameName || status.lastLocation ||
+          (status.placeId ? `placeId: ${status.placeId}` : null) ||
+          (status.universeId ? `universeId: ${status.universeId}` : null) ||
+          "Roblox oyun bilgisi yok (privacy kapalı olabilir)";
         await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${gameText}`);
         return;
       }
-
-      await message.reply("online.");
-      return;
+      await message.reply("online."); return;
     }
 
-    // === *gökhanraw (admin debug) ===
     if ((lower === "*gökhanraw" || lower === "*gokhanraw") && isAdmin) {
       const status = await fetchRobloxStatus();
       await message.reply("```json\n" + JSON.stringify(status?.raw ?? null, null, 2).slice(0, 1800) + "\n```");
       return;
     }
 
-    // === ADMIN KOMUTLARI ===
     if (isAdmin) {
       if (lower === "*reaction off") { reactionsEnabled = false; await message.reply("reaction kapalı"); return; }
       if (lower === "*reaction on")  { reactionsEnabled = true;  await message.reply("reaction açık");  return; }
       if (lower === "*reaction status") { await message.reply(reactionsEnabled ? "açık" : "kapalı"); return; }
-
       if (lower === "*seed status") {
         if (!seedState.startedAt) { await message.reply("Seed başlamadı."); return; }
         const elapsed = Date.now() - seedState.startedAt;
         const rate = Math.round(seedState.collected / Math.max(1, elapsed / 1000));
         const st = seedState.running ? "çalışıyor" : seedState.done ? "tamamlandı" : seedState.error ? "hata" : "durdu";
         await message.reply([
-          `seed: ${st}`,
-          `kanal: #${seedState.channelName ?? "?"}`,
+          `seed: ${st}`, `kanal: #${seedState.channelName ?? "?"}`,
           `toplanan: ${seedState.collected}/${seedState.max}`,
           `fetch: ${seedState.fetchCount}`,
           `süre: ${formatDuration(elapsed)} (~${rate} msg/sn)`,
@@ -1057,27 +951,20 @@ client.on("messageCreate", async (message) => {
         ].filter(Boolean).join("\n"));
         return;
       }
-
       if (lower === "*gemini test") {
         const out = await askGemini("Merhaba, nasılsın?", false);
         await message.reply(out ? `Gemini: ${out}` : "Gemini yanıt vermedi (key kontrol et)");
         return;
       }
-
       if (lower === "*yardim" || lower === "*help") {
         await message.reply([
           "**komutlar:**",
-          "`*reaction on/off/status`",
-          "`*seed status`",
-          "`*gemini test`",
+          "`*reaction on/off/status`", "`*seed status`", "`*gemini test`",
           "`*ai [mesaj]` — yapay zeka cevabı",
-          "`*gökhan`",
-          "`*gökhanraw`",
-          "`*yardim`",
+          "`*gökhan`", "`*gökhanraw`", "`*yardim`",
         ].join("\n"));
         return;
       }
-
       if (isDM && !lower.startsWith("*")) {
         console.log(`DM from admin: ${content}`);
         const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
@@ -1120,10 +1007,8 @@ client.on("messageCreate", async (message) => {
     // === @MENTION CEVAP ===
     if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
       if (await handleGuessGame(message, content)) return;
-
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
-
       const recentHistory = await fetchRecentHistory(message.channel, 8);
       const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
       const out = await askGemini(cleanContent || "ne düşünüyorsun", false, recentHistory) || randomSentence();
@@ -1132,16 +1017,10 @@ client.on("messageCreate", async (message) => {
     }
 
     // === BOT MESAJINA REPLY ===
-    if (
-      message.reference &&
-      message.mentions.repliedUser?.id === client.user.id &&
-      Math.random() < REPLY_RESPONSE_CHANCE
-    ) {
+    if (message.reference && message.mentions.repliedUser?.id === client.user.id && Math.random() < REPLY_RESPONSE_CHANCE) {
       if (await handleGuessGame(message, content)) return;
-
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
-
       const recentHistory = await fetchRecentHistory(message.channel, 8);
       const out = await askGemini(content, false, recentHistory) || randomSentence();
       await message.reply(out);
@@ -1153,7 +1032,6 @@ client.on("messageCreate", async (message) => {
     if (messageCounter >= nextMessageTarget) {
       messageCounter = 0;
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
-
       const out = generateMarkov() || randomSentence();
       await message.channel.send(out);
     }
@@ -1161,7 +1039,6 @@ client.on("messageCreate", async (message) => {
     // === REACTION ===
     if (!reactionsEnabled) return;
     if (message.author.id !== TARGET_USER_ID) return;
-
     const has1 = message.reactions.cache.some((r) => r.emoji.name === EMOJI_1);
     const has2 = message.reactions.cache.some((r) => r.emoji.name === EMOJI_2);
     if (!has1) await message.react(EMOJI_1);
@@ -1176,7 +1053,6 @@ client.on("messageCreate", async (message) => {
    LOGIN
 ========================= */
 console.log("Discord login başlıyor... token var mı?", Boolean(process.env.DISCORD_TOKEN));
-
 client.on("error",   (e) => console.error("Discord error:",  e));
 client.on("shardError", (e) => console.error("Shard error:", e));
 process.on("unhandledRejection", (e) => console.error("UnhandledRejection:", e));
