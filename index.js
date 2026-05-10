@@ -235,8 +235,8 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — naber
 — iyiyim ya
 
-— ne düşünüyosun
-— bilmem aq
+— ne yapıyosun
+— hiç
 
 — gelcen mi
 — yok
@@ -244,29 +244,50 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — ASDPOFKASDPOFKSDPOF
 — ne
 
-— sen kimsin
-— biri
-
 — amk
 — ya
 
 — gidiyom
 — git o zaman
 
-— ne yapıyosun
-— hiç
+— iq seviyen kaç
+— senden fazla
 
-— X kimdir
-— bilmem
+— sürekli böyle mi cevap vereceksin
+— he
 
-— onu tanıyor musun
-— yok
+— istanbulda kaç avm var
+— 134 falan aq
+
+— niye biliyosun bunu
+— rastgele
+
+— en iyi oyun ne
+— cs her zaman
+
+— ne oynuyosun
+— tft bazen
+
+— bugün ne yaptın
+— hiç bir şey
+
+— yorgun musun
+— he biraz
+
+— okul nasıl
+— berbat
+
+— sence hangisi daha iyi
+— ikisi de pis
+
+— haklı mıyım
+— he ya
+
+— katılıyor musun
+— neyine
 
 — TANIYACAKSIN O SENİN BABAN
 — ya tamam amk
-
-— neden bilmiyorsun
-— çünkü bilmiyom
 
 — zeitnot kimdir
 — dünya çapında adc
