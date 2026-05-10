@@ -149,15 +149,37 @@ function sleep(ms) {
    GEMINI AI
 ========================= */
 
-function buildContextSamples(n = 30) {
+function buildContextSamples(n = 40) {
   if (memory.length === 0) return "";
-  const usable = memory.slice(Math.max(0, memory.length - RECENT_EXCLUDE - 1), memory.length - RECENT_EXCLUDE);
+  const usable = memory.slice(0, Math.max(0, memory.length - RECENT_EXCLUDE));
   if (usable.length === 0) return "";
-  const sample = usable.slice(-n);
-  return sample.join("\n");
+  return usable.slice(-n).join("\n");
 }
 
-async function askGemini(userMessage = null, isRandom = false) {
+async function fetchRecentHistory(channel, limit = 8) {
+  try {
+    const msgs = await channel.messages.fetch({ limit: limit + 1 });
+    return Array.from(msgs.values())
+      .reverse()
+      .slice(0, limit)
+      .map(m => ({
+        isBot: m.author.id === client.user?.id,
+        username: m.author.username || "biri",
+        content: (m.content || "").replace(/<@!?\d+>/g, "").trim(),
+      }))
+      .filter(m => m.content.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function buildRecentBlock(recentHistory) {
+  return recentHistory
+    .map(h => `${h.isBot ? "Sen" : h.username}: ${h.content}`)
+    .join("\n");
+}
+
+async function askGemini(userMessage = null, isRandom = false, recentHistory = []) {
   if (!GEMINI_API_KEY) return null;
 
   const contextSamples = buildContextSamples(40);
@@ -176,11 +198,17 @@ KURALLAR (hiçbirini ihlal etme):
 ÖRNEK MESAJLAR:
 ${contextSamples || "(yok)"}`;
 
+  const recentBlock = buildRecentBlock(recentHistory);
+
   let prompt;
   if (isRandom) {
-    prompt = "Sunucuya bir şey yaz.";
+    prompt = recentBlock
+      ? `Kanalda şu an bunlar konuşuluyor:\n${recentBlock}\n\nBu konuşmaya kısa bir yorum kat.`
+      : "Sunucuya bir şey yaz.";
   } else {
-    prompt = userMessage || "naber";
+    prompt = recentBlock
+      ? `Son konuşmalar:\n${recentBlock}\n\n${userMessage || "naber"}`
+      : userMessage || "naber";
   }
 
   const body = {
@@ -702,8 +730,9 @@ client.on("messageCreate", async (message) => {
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
+      const recentHistory = await fetchRecentHistory(message.channel, 8);
       const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
-      const out = await askGemini(cleanContent || "ne düşünüyorsun", false) || randomSentence();
+      const out = await askGemini(cleanContent || "ne düşünüyorsun", false, recentHistory) || randomSentence();
       await message.reply(out);
       return;
     }
@@ -717,7 +746,8 @@ client.on("messageCreate", async (message) => {
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
 
-      const out = await askGemini(content, false) || randomSentence();
+      const recentHistory = await fetchRecentHistory(message.channel, 8);
+      const out = await askGemini(content, false, recentHistory) || randomSentence();
       await message.reply(out);
       return;
     }
@@ -728,7 +758,8 @@ client.on("messageCreate", async (message) => {
       messageCounter = 0;
       nextMessageTarget = Math.floor(Math.random() * 31) + 20;
 
-      const out = await askGemini(null, true) || randomSentence();
+      const recentHistory = await fetchRecentHistory(message.channel, 8);
+      const out = await askGemini(null, true, recentHistory) || randomSentence();
       await message.channel.send(out);
     }
 
