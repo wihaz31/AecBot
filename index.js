@@ -441,7 +441,7 @@ async function uploadSeedToGemini() {
 /* =========================
    MARKOV ZİNCİRİ
 ========================= */
-const markovChain = new Map(); // "w1 w2" -> [w3, w3, ...]
+const markovChain = new Map();
 const markovStarts = [];
 
 function buildMarkov() {
@@ -1009,9 +1009,7 @@ client.on("messageCreate", async (message) => {
       if (await handleGuessGame(message, content)) return;
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
-      const recentHistory = await fetchRecentHistory(message.channel, 8);
-      const cleanContent = content.replace(/<@!?\d+>/g, "").trim();
-      const out = await askGemini(cleanContent || "ne düşünüyorsun", false, recentHistory) || randomSentence();
+      const out = generateMarkov() || randomSentence();
       await message.reply(out);
       return;
     }
@@ -1021,8 +1019,7 @@ client.on("messageCreate", async (message) => {
       if (await handleGuessGame(message, content)) return;
       const choiceAnswer = handleSimpleChoiceQuestion(content);
       if (choiceAnswer) { await message.reply(choiceAnswer); return; }
-      const recentHistory = await fetchRecentHistory(message.channel, 8);
-      const out = await askGemini(content, false, recentHistory) || randomSentence();
+      const out = generateMarkov() || randomSentence();
       await message.reply(out);
       return;
     }
