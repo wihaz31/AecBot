@@ -25,7 +25,7 @@ const ROBLOX_USER_ID  = "2575829815";
 const GROQ_API_KEY    = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL      = "llama-3.3-70b-versatile";
 const GEMINI_API_KEY  = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL    = "gemini-2.5-flash-lite-preview-06-17";
+const GEMINI_MODEL    = "gemini-1.5-flash";
 const RETRY_DELAYS    = [2000, 4000];
 
 let reactionsEnabled  = false;
@@ -397,7 +397,7 @@ async function askGemini(userMessage, isRandom, recentHistory) {
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     try {
       const res = await fetchWithTimeout(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
         15000
       );
@@ -409,7 +409,7 @@ async function askGemini(userMessage, isRandom, recentHistory) {
           await sleep(RETRY_DELAYS[attempt]);
           continue;
         }
-        console.error(`[GEMINI] HTTP ${res.status}:`, errText.slice(0, 150));
+        console.error(`[GEMINI] HTTP ${res.status}:`, errText);
         return null;
       }
 
