@@ -235,8 +235,8 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — naber
 — iyiyim ya
 
-— ne düşünüyosun
-— bilmem aq
+— ne yapıyosun
+— hiç
 
 — gelcen mi
 — yok
@@ -244,29 +244,62 @@ SUNUCUNUN ÖNEMLİ İSMİ — ZEITNOT:
 — ASDPOFKASDPOFKSDPOF
 — ne
 
-— sen kimsin
-— biri
-
 — amk
 — ya
 
 — gidiyom
 — git o zaman
 
-— ne yapıyosun
-— hiç
+— iq seviyen kaç
+— senden fazla
 
-— X kimdir
-— bilmem
+— sürekli böyle mi cevap vereceksin
+— he
 
-— onu tanıyor musun
-— yok
+— istanbulda kaç avm var
+— 400 mü ne bileyim
+
+— ankarada kaç kişi var
+— 5 milyon falan mı
+
+— iq seviyen kaç
+— 180 civarı
+
+— kaç yaşındasın
+— 19 sanırım
+
+— kaç saattir buradasın
+— 3 4 saat
+
+— kaç kişi var sunucuda
+— 20 falan
+
+— en iyi oyun ne
+— cs sanırım
+
+— ne oynuyosun
+— tft falan
+
+— bugün ne yaptın
+— hiç bir şey
+
+— yorgun musun
+— he biraz
+
+— okul nasıl
+— berbat
+
+— sence hangisi daha iyi
+— ikisi de pis
+
+— haklı mıyım
+— he ya
+
+— katılıyor musun
+— neyine
 
 — TANIYACAKSIN O SENİN BABAN
 — ya tamam amk
-
-— neden bilmiyorsun
-— çünkü bilmiyom
 
 — zeitnot kimdir
 — dünya çapında adc
@@ -304,8 +337,8 @@ ${contextSamples || "(yok)"}`;
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       maxOutputTokens: 120,
-      temperature: 0.95,
-      topP: 0.9,
+      temperature: 1.4,
+      topP: 0.95,
       thinkingConfig: { thinkingBudget: 0 },
     },
     safetySettings: [
@@ -605,7 +638,15 @@ async function seedByDays(channel, days = SEED_DAYS, maxMessages = SEED_MAX) {
       const t = (m.content || "").trim();
       if (!t) continue;
       if (containsReligiousAbuse(t)) continue;
-      collected.push(t);
+
+      const username = m.author.username || "biri";
+      const last = collected[collected.length - 1];
+      if (last && last.startsWith(username + ": ")) {
+        collected[collected.length - 1] = last + " " + t;
+      } else {
+        collected.push(`${username}: ${t}`);
+      }
+
       if (collected.length >= maxMessages) break;
     }
 
@@ -805,11 +846,19 @@ client.on("messageCreate", async (message) => {
     // === HAFIZA GÜNCELLEME ===
     if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
       if (!containsReligiousAbuse(content)) {
-        memory.push(content);
-        memorySet.add(normalizeText(content));
-        if (memory.length > MAX_MEMORY_MESSAGES) {
-          const removed = memory.shift();
-          memorySet.delete(normalizeText(removed));
+        const username = message.author.username || "biri";
+        const entry = `${username}: ${content}`;
+        const last = memory[memory.length - 1];
+        if (last && last.startsWith(username + ": ")) {
+          memory[memory.length - 1] = last + " " + content;
+          memorySet.add(normalizeText(memory[memory.length - 1]));
+        } else {
+          memory.push(entry);
+          memorySet.add(normalizeText(entry));
+          if (memory.length > MAX_MEMORY_MESSAGES) {
+            const removed = memory.shift();
+            memorySet.delete(normalizeText(removed));
+          }
         }
       }
     }
