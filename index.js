@@ -274,6 +274,7 @@ ${contextSamples || "(yok)"}`;
       maxOutputTokens: 120,
       temperature: 0.95,
       topP: 0.9,
+      thinkingConfig: { thinkingBudget: 0 },
     },
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
