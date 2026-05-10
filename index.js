@@ -443,10 +443,12 @@ async function uploadSeedToGemini() {
 ========================= */
 const markovChain = new Map();
 const markovStarts = [];
+let wordPool = []; // tüm kelimeler (tekrarlı, frekans ağırlıklı)
 
 function buildMarkov() {
   markovChain.clear();
   markovStarts.length = 0;
+  wordPool = [];
 
   for (const entry of memory) {
     const colonIdx = entry.indexOf(": ");
@@ -457,6 +459,8 @@ function buildMarkov() {
     const words = msg.split(/\s+/).filter(w => w.length > 0);
     if (words.length < 2) continue;
 
+    for (const w of words) wordPool.push(w);
+
     markovStarts.push(`${words[0]} ${words[1]}`);
 
     for (let i = 0; i < words.length - 2; i++) {
@@ -466,25 +470,48 @@ function buildMarkov() {
     }
   }
 
-  console.log(`[MARKOV] Model hazır: ${markovChain.size} bigram, ${markovStarts.length} başlangıç`);
+  console.log(`[MARKOV] Model hazır: ${markovChain.size} bigram, ${markovStarts.length} başlangıç, ${wordPool.length} kelime`);
 }
 
-function generateMarkov(maxWords = 12) {
+function randomWord() {
+  return wordPool[Math.floor(Math.random() * wordPool.length)];
+}
+
+function generateMarkov() {
   if (markovStarts.length === 0) return null;
+
+  // Rastgele uzunluk: 1-14 kelime, kısa mesajlara daha fazla ağırlık
+  const maxWords = Math.random() < 0.4
+    ? Math.floor(Math.random() * 3) + 1   // %40: 1-3 kelime
+    : Math.floor(Math.random() * 9) + 3;  // %60: 3-11 kelime
+
+  // Kaos faktörü: %35 ihtimalle bigram zinciri yerine rastgele kelime ata
+  const CHAOS = 0.35;
 
   for (let attempt = 0; attempt < 15; attempt++) {
     const start = markovStarts[Math.floor(Math.random() * markovStarts.length)];
     const words = start.split(" ");
 
     for (let i = 0; i < maxWords - 2; i++) {
-      const key = `${words[words.length - 2]} ${words[words.length - 1]}`;
-      const nexts = markovChain.get(key);
-      if (!nexts || nexts.length === 0) break;
-      words.push(nexts[Math.floor(Math.random() * nexts.length)]);
+      if (Math.random() < CHAOS) {
+        // Zinciri kır, rastgele kelime ekle ve devam et
+        words.push(randomWord());
+      } else {
+        const key = `${words[words.length - 2]} ${words[words.length - 1]}`;
+        const nexts = markovChain.get(key);
+        if (!nexts || nexts.length === 0) {
+          // Zincir koptu — rastgele kelimeyle devam et
+          if (words.length >= 2) words.push(randomWord());
+          break;
+        }
+        words.push(nexts[Math.floor(Math.random() * nexts.length)]);
+      }
     }
 
-    if (words.length >= 2) {
-      const text = words.join(" ");
+    // maxWords=1 durumunda sadece 1 kelime üret
+    const output = maxWords === 1 ? [randomWord()] : words;
+    if (output.length >= 1) {
+      const text = output.join(" ");
       if (!containsReligiousAbuse(text)) return text;
     }
   }
