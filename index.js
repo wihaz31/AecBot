@@ -37,6 +37,7 @@ const CMD_KEY = process.env.CMD_KEY || "";
 
 // Roblox
 const ROBLOX_USER_ID = "2575829815";
+const ROBLOX_COOKIE = process.env.ROBLOX_COOKIE || "";
 
 // Gemini
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
@@ -443,7 +444,7 @@ async function uploadSeedToGemini() {
 ========================= */
 const markovChain = new Map();
 const markovStarts = [];
-let wordPool = []; // tüm kelimeler (tekrarlı, frekans ağırlıklı)
+let wordPool = [];
 
 function buildMarkov() {
   markovChain.clear();
@@ -494,13 +495,11 @@ function generateMarkov() {
 
     for (let i = 0; i < maxWords - 2; i++) {
       if (Math.random() < CHAOS) {
-        // Zinciri kır, rastgele kelime ekle ve devam et
         words.push(randomWord());
       } else {
         const key = `${words[words.length - 2]} ${words[words.length - 1]}`;
         const nexts = markovChain.get(key);
         if (!nexts || nexts.length === 0) {
-          // Zincir koptu — rastgele kelimeyle devam et
           if (words.length >= 2) words.push(randomWord());
           break;
         }
@@ -730,9 +729,11 @@ async function fetchUniverseIdFromPlace(placeId) {
 
 async function fetchRobloxStatus() {
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (ROBLOX_COOKIE) headers["Cookie"] = `.ROBLOSECURITY=${ROBLOX_COOKIE}`;
     const r = await fetchWithTimeout(
       "https://presence.roblox.com/v1/presence/users",
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }) },
+      { method: "POST", headers, body: JSON.stringify({ userIds: [Number(ROBLOX_USER_ID)] }) },
       12000
     );
     if (!r.ok) return null;
