@@ -647,7 +647,7 @@ function getStartWord() {
   if (wordPool.length > 0) {
     for (let i = 0; i < 100; i++) {
       const w = wordPool[Math.floor(Math.random() * wordPool.length)].toLowerCase();
-      if (w.length >= 4 && /^[a-zğüşıöç]+$/.test(w)) return w;
+      if (w.length >= 4 && /^[a-zğüşıöç]+$/.test(w) && w[w.length - 1] !== "ğ") return w;
     }
   }
   return fallback[Math.floor(Math.random() * fallback.length)];
@@ -1368,6 +1368,8 @@ client.on("messageCreate", async (message) => {
       const word = content.trim().toLowerCase();
       if (isWordOnly(word)) {
         if (foldTR(word[0]) !== foldTR(game.requiredLetter) || game.usedWords.has(word)) {
+          await message.react("❌");
+        } else if (wordLastLetter(word) === "ğ") {
           await message.react("❌");
         } else {
           const valid = await isTurkishWord(word);
