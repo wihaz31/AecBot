@@ -4,6 +4,7 @@ const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
+const fs = require("fs");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 
@@ -517,6 +518,151 @@ function generateMarkov() {
 }
 
 /* =========================
+   EKONOMİ SİSTEMİ
+========================= */
+const ECONOMY_FILE = "./economy.json";
+const DEFAULT_BALANCE = 1000;
+const BONUS_AMOUNT = 500;
+const BONUS_COOLDOWN = 24 * 60 * 60 * 1000;
+const balances = new Map();
+const lastBonus = new Map();
+
+function loadEconomy() {
+  try {
+    const raw = fs.readFileSync(ECONOMY_FILE, "utf8");
+    for (const [k, v] of Object.entries(JSON.parse(raw))) balances.set(k, Number(v));
+    console.log(`[EKONOMİ] ${balances.size} kullanıcı yüklendi`);
+  } catch { }
+}
+
+function saveEconomy() {
+  try {
+    fs.writeFileSync(ECONOMY_FILE, JSON.stringify(Object.fromEntries(balances)));
+  } catch (e) { console.error("[EKONOMİ] Kayıt hatası:", e?.message); }
+}
+
+function getBalance(userId) {
+  if (!balances.has(userId)) balances.set(userId, DEFAULT_BALANCE);
+  return balances.get(userId);
+}
+
+function setBalance(userId, amount) {
+  balances.set(userId, Math.max(0, Math.floor(amount)));
+  saveEconomy();
+}
+
+function parseBet(str, userId) {
+  const bal = getBalance(userId);
+  if (!str || str === "hepsi" || str === "all") return bal > 0 ? bal : null;
+  const n = parseInt(str);
+  if (isNaN(n) || n <= 0) return null;
+  if (n > bal) return null;
+  return n;
+}
+
+/* =========================
+   BLACKJACK
+========================= */
+const BJ_FACES = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+const BJ_SUITS = ["♠","♥","♦","♣"];
+const bjGames = new Map();
+
+function makeDeck() {
+  const deck = [];
+  for (const s of BJ_SUITS) for (const f of BJ_FACES) deck.push(f + s);
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function bjCardVal(card) {
+  const f = card.startsWith("10") ? "10" : card[0];
+  if (f === "A") return 11;
+  if (["J","Q","K"].includes(f)) return 10;
+  return parseInt(f);
+}
+
+function bjHandVal(hand) {
+  let val = hand.reduce((s, c) => s + bjCardVal(c), 0);
+  let aces = hand.filter(c => c.startsWith("A")).length;
+  while (val > 21 && aces > 0) { val -= 10; aces--; }
+  return val;
+}
+
+function bjShowHand(hand, hideSecond = false) {
+  if (hideSecond) return `${hand[0]} ??`;
+  return `${hand.join(" ")} **(${bjHandVal(hand)})**`;
+}
+
+async function bjStand(message, game) {
+  bjGames.delete(message.author.id);
+  while (bjHandVal(game.dealerHand) < 17) game.dealerHand.push(game.deck.pop());
+  const pv = bjHandVal(game.playerHand);
+  const dv = bjHandVal(game.dealerHand);
+  const bal = getBalance(message.author.id);
+  let result;
+  if (dv > 21 || pv > dv) {
+    setBalance(message.author.id, bal + game.bet);
+    result = `kazandın +${game.bet} 🪙`;
+  } else if (pv === dv) {
+    result = `berabere, para iade`;
+  } else {
+    setBalance(message.author.id, bal - game.bet);
+    result = `kaybettin -${game.bet} 🪙`;
+  }
+  await message.reply(
+    `Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\n${result} | Bakiye: ${getBalance(message.author.id)} 🪙`
+  );
+}
+
+/* =========================
+   KELİME OYUNU
+========================= */
+const wordGames = new Map();
+
+function getStartWord() {
+  const fallback = ["araba","bilgisayar","oyun","masa","kalem","defter","telefon","futbol","deniz","orman","aslan","kapı","yıldız","nehir","bahçe"];
+  if (wordPool.length > 0) {
+    for (let i = 0; i < 100; i++) {
+      const w = wordPool[Math.floor(Math.random() * wordPool.length)].toLowerCase();
+      if (w.length >= 4 && /^[a-zğüşıöç]+$/.test(w)) return w;
+    }
+  }
+  return fallback[Math.floor(Math.random() * fallback.length)];
+}
+
+function wordLastLetter(word) {
+  return word[word.length - 1].toLowerCase();
+}
+
+function isWordOnly(text) {
+  return /^[a-zA-ZğüşıöçĞÜŞİÖÇ]{3,}$/.test(text.trim());
+}
+
+/* =========================
+   İYİ GECELER
+========================= */
+function isGoodNight(text) {
+  const t = foldTR(text.trim());
+  return /^(ig|gn|geceler|iyi geceler|gece|gece herkese|iyi geceler herkese|geceler herkese|gn herkese)[!. ]*$/.test(t);
+}
+
+const GOOD_NIGHT_POOL = [
+  ...Array(30).fill("hadi sq"),
+  ...Array(25).fill("siktir git"),
+  ...Array(20).fill("sg"),
+  ...Array(15).fill("git artik"),
+  ...Array(5).fill("iyi geceler"),
+  ...Array(5).fill("ig"),
+];
+
+function goodNightReply() {
+  return GOOD_NIGHT_POOL[Math.floor(Math.random() * GOOD_NIGHT_POOL.length)];
+}
+
+/* =========================
    FALLBACK
 ========================= */
 function randomFrom(arr) {
@@ -879,6 +1025,7 @@ const client = new Client({
 async function onClientReady() {
   console.log(`Bot aktif: ${client.user.tag}`);
   if (!GEMINI_API_KEY) console.warn("[GEMINI] UYARI: GEMINI_API_KEY tanımlı değil! Fallback kullanılacak.");
+  loadEconomy();
   try {
     const ch = await client.channels.fetch(SEED_CHANNEL_ID);
     if (!ch || !ch.isTextBased()) { console.log("Seed: Kanal bulunamadı."); return; }
@@ -985,9 +1132,17 @@ client.on("messageCreate", async (message) => {
       if (lower === "*yardim" || lower === "*help") {
         await message.reply([
           "**komutlar:**",
-          "`*reaction on/off/status`", "`*seed status`", "`*gemini test`",
-          "`*ai [mesaj]` — yapay zeka cevabı",
-          "`*gökhan`", "`*gökhanraw`", "`*yardim`",
+          "`*ai [mesaj]` — yapay zeka",
+          "`*bakiye` / `*para` — para bakiyesi",
+          "`*bonus` — günlük 500 🪙",
+          "`*zar [miktar]` — zar bahsi",
+          "`*tura [miktar] yazı/tura` — yazı tura",
+          "`*tkt [miktar] taş/kağıt/makas` — taş kağıt makas",
+          "`*bj [miktar]` — blackjack (kart/dur)",
+          "`*ver @kişi [miktar]` — para gönder",
+          "`*kelime` — kelime oyunu başlat",
+          "`*kelimeson` — kelime oyunu bitir",
+          "`*gökhan`", "`*reaction on/off/status`", "`*seed status`",
         ].join("\n"));
         return;
       }
@@ -1000,6 +1155,163 @@ client.on("messageCreate", async (message) => {
     }
 
     if (isDM) return;
+
+    // === İYİ GECELER ===
+    if (isGoodNight(content) && Math.random() < 0.75) {
+      await message.reply(goodNightReply());
+    }
+
+    // === BLACKJACK DEVAM (kart/dur) ===
+    if (bjGames.has(message.author.id)) {
+      const game = bjGames.get(message.author.id);
+      if (game.channelId === message.channelId) {
+        const bjCmd = foldTR(content.trim());
+        if (bjCmd === "kart" || bjCmd === "hit") {
+          const card = game.deck.pop();
+          game.playerHand.push(card);
+          const val = bjHandVal(game.playerHand);
+          if (val > 21) {
+            bjGames.delete(message.author.id);
+            setBalance(message.author.id, getBalance(message.author.id) - game.bet);
+            await message.reply(`Sen: ${bjShowHand(game.playerHand)} — BUST! -${game.bet} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
+          } else {
+            await message.reply(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand, true)}\n*kart* veya *dur*`);
+          }
+          return;
+        }
+        if (bjCmd === "dur" || bjCmd === "stand") {
+          await bjStand(message, game);
+          return;
+        }
+      }
+    }
+
+    // === EKONOMİ KOMUTLARI ===
+    if (lower === "*bakiye" || lower === "*para") {
+      await message.reply(`bakiyen: **${getBalance(message.author.id)}** 🪙`);
+      return;
+    }
+
+    if (lower === "*bonus") {
+      const last = lastBonus.get(message.author.id) || 0;
+      const diff = Date.now() - last;
+      if (diff < BONUS_COOLDOWN) {
+        const rem = BONUS_COOLDOWN - diff;
+        const h = Math.floor(rem / 3600000);
+        const m = Math.floor((rem % 3600000) / 60000);
+        await message.reply(`günlük bonusu zaten aldın. ${h}s ${m}dk sonra tekrar`);
+        return;
+      }
+      lastBonus.set(message.author.id, Date.now());
+      setBalance(message.author.id, getBalance(message.author.id) + BONUS_AMOUNT);
+      await message.reply(`günlük bonus +${BONUS_AMOUNT} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
+      return;
+    }
+
+    if (lower.startsWith("*ver")) {
+      const target = message.mentions.users.first();
+      const parts = content.split(/\s+/);
+      const bet = parseBet(parts[parts.length - 1], message.author.id);
+      if (!target || !bet || target.id === message.author.id || target.bot) {
+        await message.reply("kullanım: *ver @kişi miktar");
+        return;
+      }
+      setBalance(message.author.id, getBalance(message.author.id) - bet);
+      setBalance(target.id, getBalance(target.id) + bet);
+      await message.reply(`${target.username}'a **${bet}** 🪙 gönderildi`);
+      return;
+    }
+
+    if (lower.startsWith("*zar")) {
+      const parts = content.split(/\s+/);
+      const bet = parseBet(parts[1], message.author.id);
+      if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
+      const ur = Math.floor(Math.random() * 6) + 1;
+      const br = Math.floor(Math.random() * 6) + 1;
+      const bal = getBalance(message.author.id);
+      let result;
+      if (ur > br) { setBalance(message.author.id, bal + bet); result = `kazandın +${bet} 🪙`; }
+      else if (ur < br) { setBalance(message.author.id, bal - bet); result = `kaybettin -${bet} 🪙`; }
+      else result = "berabere, para iade";
+      await message.reply(`Sen: **${ur}** | Ben: **${br}** — ${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
+      return;
+    }
+
+    if (lower.startsWith("*tura")) {
+      const parts = content.split(/\s+/);
+      const bet = parseBet(parts[1], message.author.id);
+      const choice = foldTR((parts[2] || "").toLowerCase());
+      if (!bet || !["yazi", "tura"].includes(choice)) {
+        await message.reply(`kullanım: *tura [miktar] yazı/tura | bakiyen: ${getBalance(message.author.id)} 🪙`);
+        return;
+      }
+      const result = Math.random() < 0.5 ? "yazı" : "tura";
+      const bal = getBalance(message.author.id);
+      if (foldTR(result) === choice) {
+        setBalance(message.author.id, bal + bet);
+        await message.reply(`**${result}** — kazandın +${bet} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
+      } else {
+        setBalance(message.author.id, bal - bet);
+        await message.reply(`**${result}** — kaybettin -${bet} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
+      }
+      return;
+    }
+
+    if (lower.startsWith("*tkt")) {
+      const parts = content.split(/\s+/);
+      const bet = parseBet(parts[1], message.author.id);
+      const choice = foldTR((parts[2] || "").toLowerCase());
+      const valid = ["tas", "kagit", "makas"];
+      if (!bet || !valid.includes(choice)) {
+        await message.reply(`kullanım: *tkt [miktar] taş/kağıt/makas | bakiyen: ${getBalance(message.author.id)} 🪙`);
+        return;
+      }
+      const botPick = valid[Math.floor(Math.random() * 3)];
+      const names = { tas: "taş", kagit: "kağıt", makas: "makas" };
+      const beats = { tas: "makas", kagit: "tas", makas: "kagit" };
+      const bal = getBalance(message.author.id);
+      let result;
+      if (choice === botPick) result = "berabere, para iade";
+      else if (beats[choice] === botPick) { setBalance(message.author.id, bal + bet); result = `kazandın +${bet} 🪙`; }
+      else { setBalance(message.author.id, bal - bet); result = `kaybettin -${bet} 🪙`; }
+      await message.reply(`Sen: **${names[choice]}** | Ben: **${names[botPick]}** — ${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
+      return;
+    }
+
+    if (lower.startsWith("*bj")) {
+      const parts = content.split(/\s+/);
+      const bet = parseBet(parts[1], message.author.id);
+      if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
+      if (bjGames.has(message.author.id)) { await message.reply("zaten aktif bir oyunun var. *kart* veya *dur*"); return; }
+      const deck = makeDeck();
+      const playerHand = [deck.pop(), deck.pop()];
+      const dealerHand = [deck.pop(), deck.pop()];
+      if (bjHandVal(playerHand) === 21) {
+        const win = Math.floor(bet * 1.5);
+        setBalance(message.author.id, getBalance(message.author.id) + win);
+        await message.reply(`Sen: ${bjShowHand(playerHand)} — BLACKJACK! +${win} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
+        return;
+      }
+      bjGames.set(message.author.id, { deck, playerHand, dealerHand, bet, channelId: message.channelId });
+      await message.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand, true)}\n*kart* veya *dur* | Bahis: ${bet} 🪙`);
+      return;
+    }
+
+    // === KELİME OYUNU KOMUTLARI ===
+    if (lower === "*kelime") {
+      const word = getStartWord();
+      wordGames.set(message.channelId, { lastWord: word, requiredLetter: wordLastLetter(word), usedWords: new Set([word]) });
+      await message.channel.send(`kelime oyunu başladı! **${word}** — sıradaki kelime **'${wordLastLetter(word)}'** ile başlamalı`);
+      return;
+    }
+
+    if (lower === "*kelimeson" || lower === "*kelimedur") {
+      if (wordGames.has(message.channelId)) {
+        wordGames.delete(message.channelId);
+        await message.channel.send("kelime oyunu bitti");
+      }
+      return;
+    }
 
     // === *AI KOMUTU (herkese açık) ===
     if (lower.startsWith("*ai")) {
@@ -1027,6 +1339,23 @@ client.on("messageCreate", async (message) => {
             memorySet.delete(normalizeText(removed));
           }
         }
+      }
+    }
+
+    // === KELİME OYUNU KONTROLÜ ===
+    if (wordGames.has(message.channelId) && !message.mentions.has(client.user)) {
+      const game = wordGames.get(message.channelId);
+      const word = content.trim().toLowerCase();
+      if (isWordOnly(word)) {
+        if (foldTR(word[0]) !== foldTR(game.requiredLetter) || game.usedWords.has(word)) {
+          await message.react("❌");
+        } else {
+          game.usedWords.add(word);
+          game.lastWord = word;
+          game.requiredLetter = wordLastLetter(word);
+          await message.react("✅");
+        }
+        return;
       }
     }
 
