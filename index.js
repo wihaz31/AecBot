@@ -1371,6 +1371,7 @@ client.on("messageCreate", async (message) => {
           await message.react("❌");
         } else if (wordLastLetter(word) === "ğ") {
           await message.react("❌");
+          await message.reply("ğ ile başlayan kelime yok, çıkmaz sokak");
         } else {
           const valid = await isTurkishWord(word);
           if (!valid) {
