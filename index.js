@@ -1169,7 +1169,21 @@ client.on("messageCreate", async (message) => {
       if (isDM && !lower.startsWith("*")) {
         console.log(`DM from admin: ${content}`);
         const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
-        if (targetChannel?.isTextBased()) await targetChannel.send(content);
+        if (targetChannel?.isTextBased()) {
+          let text = content;
+          const mentions = [...content.matchAll(/@([^\s@#]+)/g)];
+          for (const m of mentions) {
+            try {
+              const results = await targetChannel.guild.members.fetch({ query: m[1], limit: 5 });
+              const match = results.find(mb =>
+                mb.user.username.toLowerCase() === m[1].toLowerCase() ||
+                mb.displayName.toLowerCase() === m[1].toLowerCase()
+              ) || results.first();
+              if (match) text = text.replace(m[0], `<@${match.id}>`);
+            } catch { }
+          }
+          await targetChannel.send(text);
+        }
         return;
       }
     }
