@@ -621,6 +621,26 @@ async function bjStand(message, game) {
    KELİME OYUNU
 ========================= */
 const wordGames = new Map();
+const tdkCache = new Map();
+
+async function isTurkishWord(word) {
+  const key = foldTR(word);
+  if (tdkCache.has(key)) return tdkCache.get(key);
+  try {
+    const r = await fetchWithTimeout(
+      `https://sozluk.gov.tr/gts?ara=${encodeURIComponent(word)}`,
+      {},
+      5000
+    );
+    if (!r.ok) return true;
+    const data = await r.json();
+    const valid = Array.isArray(data) && data.length > 0;
+    tdkCache.set(key, valid);
+    return valid;
+  } catch {
+    return true; // TDK erişilemezse kabul et
+  }
+}
 
 function getStartWord() {
   const fallback = ["araba","bilgisayar","oyun","masa","kalem","defter","telefon","futbol","deniz","orman","aslan","kapı","yıldız","nehir","bahçe"];
@@ -1350,10 +1370,15 @@ client.on("messageCreate", async (message) => {
         if (foldTR(word[0]) !== foldTR(game.requiredLetter) || game.usedWords.has(word)) {
           await message.react("❌");
         } else {
-          game.usedWords.add(word);
-          game.lastWord = word;
-          game.requiredLetter = wordLastLetter(word);
-          await message.react("✅");
+          const valid = await isTurkishWord(word);
+          if (!valid) {
+            await message.react("❌");
+          } else {
+            game.usedWords.add(word);
+            game.lastWord = word;
+            game.requiredLetter = wordLastLetter(word);
+            await message.react("✅");
+          }
         }
         return;
       }
