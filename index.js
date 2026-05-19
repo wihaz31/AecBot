@@ -192,7 +192,7 @@ function getRandomMemory(n = 5) {
 }
 
 /* =========================
-   GEMINI SİSTEM PROMPTU
+   GEMİNİ SİSTEM PROMPTU
 ========================= */
 const SYSTEM_PROMPT = `Sen bir Türk Discord sunucusunda yaşayan bir botsun. Kısa, samimi, bazen argo konuşuyorsun.
 - Cevaplar genelde 1-5 kelime. Çoğu zaman tek kelime yeterli: "he", "yok", "ya", "amk", "neyse"
@@ -224,7 +224,6 @@ function buildMarkov(messages) {
 
     if (words.length < 2) continue;
 
-    // Kelime havuzu için topla
     words.forEach((w) => {
       if (w.length >= 3 && /^[a-zğüşıöç]+$/.test(w)) allWords.add(w);
     });
@@ -251,12 +250,10 @@ function generateMarkov(startWord = null) {
 
   const start = startWord || markovStarts[Math.floor(Math.random() * markovStarts.length)];
 
-  // Rastgele uzunluk: minimum 3, çoğunlukla 4-10 kelime
   const targetLen = Math.random() < 0.4
-    ? Math.floor(Math.random() * 3) + 3   // %40: 3-5 kelime
-    : Math.floor(Math.random() * 7) + 4;  // %60: 4-10 kelime
+    ? Math.floor(Math.random() * 3) + 3
+    : Math.floor(Math.random() * 7) + 4;
 
-  // Kaos faktörü: %35 ihtimalle bigram zinciri yerine rastgele kelime ata
   const result = [start];
   let current = start;
 
@@ -408,7 +405,7 @@ async function isTurkishWord(word) {
     tdkCache.set(key, valid);
     return valid;
   } catch {
-    return true; // TDK erişilemezse kabul et
+    return true;
   }
 }
 
@@ -560,7 +557,6 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
 
-  // Seed kanalından mesajları yükle
   try {
     const channel = await client.channels.fetch(SEED_CHANNEL_ID);
     if (channel?.isTextBased()) {
@@ -669,7 +665,6 @@ client.on("messageCreate", async (message) => {
   const content = message.content.trim();
   const lower = content.toLowerCase();
 
-  // DM: admin yönlendirme
   if (isDM && !lower.startsWith("*")) {
     console.log(`DM from admin: ${content}`);
     const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
@@ -691,7 +686,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === ADMIN KOMUTLARI ===
   if (message.author.id === ADMIN_USER_ID || isDM) {
     if (lower === "*reaction on") {
       reactionsEnabled = true;
@@ -732,7 +726,7 @@ client.on("messageCreate", async (message) => {
         "`*bonus` — günlük 500 🪙",
         "`*zar [miktar]` — zar bahsi",
         "`*tura [miktar] yazı/tura` — yazı tura",
-        "`*tkt [miktar] taş/kağıt/makas` — taş kağıt makas",
+        "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
         "`*bj [miktar]` — blackjack (kart/dur)",
         "`*ver @kişi [miktar]` — para gönder",
         "`*kelime` — kelime oyunu başlat",
@@ -749,8 +743,6 @@ client.on("messageCreate", async (message) => {
       return;
     }
   }
-
-  // === GENEL KOMUTLAR ===
 
   if (lower === "*gökhan" || lower === "*gokhan") {
     await message.reply("lan gökhan ne yapıyorsun");
@@ -776,7 +768,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // Blackjack devam (kart/dur)
   if (bjGames.has(message.author.id)) {
     const game = bjGames.get(message.author.id);
     if (lower === "kart") {
@@ -819,7 +810,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === KELİME OYUNU KOMUTLARI ===
   if (lower === "*kelime") {
     const word = getStartWord();
     wordGames.set(message.channelId, { lastWord: word, requiredLetter: wordLastLetter(word), usedWords: new Set([word]), lastPlayerId: null });
@@ -835,7 +825,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === *AI KOMUTU (herkese açık) ===
   if (lower.startsWith("*ai")) {
     const query = content.slice(3).trim();
     const recentHistory = await fetchRecentHistory(message.channel, 8);
@@ -844,7 +833,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === HAFIZA GÜNCELLEME ===
   if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
     if (!containsReligiousAbuse(content)) {
       const username = message.author.username || "biri";
@@ -864,7 +852,6 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // === KELİME OYUNU KONTROLÜ ===
   if (wordGames.has(message.channelId) && !message.mentions.has(client.user)) {
     const game = wordGames.get(message.channelId);
     const word = content.trim().toLowerCase();
@@ -894,7 +881,6 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // === @MENTION CEVAP ===
   if (message.mentions.has(client.user) && Math.random() < MENTION_RESPONSE_CHANCE) {
     if (await handleGuessGame(message, content)) return;
     const choiceAnswer = handleSimpleChoiceQuestion(content);
@@ -904,7 +890,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === TAHMİN OYUNU BAŞLAT ===
   if (lower.startsWith("*tahmin")) {
     const num = Math.floor(Math.random() * 100) + 1;
     guessGames.set(message.channelId, { number: num });
@@ -978,12 +963,12 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  if (lower.startsWith("*tkt")) {
+  if (lower.startsWith("*tkm") || lower.startsWith("*rps")) {
     const parts = content.split(/\s+/);
     const valid = ["tas", "kagit", "makas"];
     const choice = foldTR(parts[2] || "");
     if (!valid.includes(choice)) {
-      await message.reply(`kullanım: *tkt [miktar] taş/kağıt/makas | bakiyen: ${getBalance(message.author.id)} 🪙`);
+      await message.reply(`kullanım: *tkm [miktar] taş/kağıt/makas | bakiyen: ${getBalance(message.author.id)} 🪙`);
       return;
     }
     const bet = parseBet(parts[1], message.author.id);
@@ -1001,7 +986,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === ROBLOX KOMUTU ===
   if (lower === "*roblox" || lower === "*oyun") {
     const presence = await getRobloxPresence();
     if (!presence) { await message.reply("bilgi alınamadı"); return; }
@@ -1014,7 +998,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === OTOMATİK CEVAP ===
   const isReply = message.reference?.messageId != null;
   let shouldRespond = false;
 
@@ -1066,7 +1049,6 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // TARGET_USER_ID reaksiyonu
   if (reactionsEnabled && message.author.id === TARGET_USER_ID) {
     try {
       await message.react(EMOJI_1);
