@@ -550,8 +550,9 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Channel],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
 client.once("ready", async () => {
@@ -727,7 +728,7 @@ client.on("messageCreate", async (message) => {
         "`*zar [miktar]` — zar bahsi",
         "`*tura [miktar] yazı/tura` — yazı tura",
         "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
-        "`*bj [miktar]` — blackjack (kart/dur)",
+        "`*bj [miktar]` — blackjack (⬆️ kart • 🛑 dur)",
         "`*ver @kişi [miktar]` — para gönder",
         "`*kelime` — kelime oyunu başlat",
         "`*kelimeson` — kelime oyunu bitir",
@@ -768,29 +769,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  if (bjGames.has(message.author.id)) {
-    const game = bjGames.get(message.author.id);
-    if (lower === "kart") {
-      game.playerHand.push(game.deck.pop());
-      if (bjHandVal(game.playerHand) > 21) {
-        const bal = getBalance(message.author.id);
-        bjGames.delete(message.author.id);
-        setBalance(message.author.id, bal - game.bet);
-        await message.reply(`Sen: ${bjShowHand(game.playerHand)} — BUST! -${game.bet} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
-      } else {
-        await message.reply(`Sen: ${bjShowHand(game.playerHand)} | Dealer: ${bjShowHand(game.dealerHand, true)} | *kart* veya *dur*`);
-      }
-      return;
-    }
-    if (lower === "dur") {
-      bjDealerPlay(game);
-      const result = bjResolve(game);
-      bjGames.delete(message.author.id);
-      await message.reply(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\n${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
-      return;
-    }
-  }
-
   if (lower.startsWith("*bj")) {
     const parts = content.split(/\s+/);
     const bet = parseBet(parts[1], message.author.id);
@@ -798,15 +776,16 @@ client.on("messageCreate", async (message) => {
     const deck = bjDeck();
     const playerHand = [deck.pop(), deck.pop()];
     const dealerHand = [deck.pop(), deck.pop()];
-    bjGames.set(message.author.id, { deck, playerHand, dealerHand, bet, userId: message.author.id });
     if (bjHandVal(playerHand) === 21) {
       bjDealerPlay({ dealerHand, deck });
       const result = bjResolve({ playerHand, dealerHand, bet, userId: message.author.id });
-      bjGames.delete(message.author.id);
       await message.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand)}\nBlackjack! ${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
       return;
     }
-    await message.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand, true)}\n*kart* veya *dur* | Bahis: ${bet} 🪙`);
+    const sent = await message.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand, true)}\nBahis: ${bet} 🪙 | ⬆️ kart çek • 🛑 dur`);
+    bjGames.set(message.author.id, { deck, playerHand, dealerHand, bet, userId: message.author.id, messageId: sent.id, channelId: sent.channelId });
+    await sent.react("⬆️");
+    await sent.react("🛑");
     return;
   }
 
@@ -1054,6 +1033,43 @@ client.on("messageCreate", async (message) => {
       await message.react(EMOJI_1);
       await message.react(EMOJI_2);
     } catch {}
+  }
+});
+
+/* =========================
+   BLACKJACK REAKSİYON
+========================= */
+client.on("messageReactionAdd", async (reaction, user) => {
+  if (user.bot) return;
+  if (reaction.partial) { try { await reaction.fetch(); } catch { return; } }
+  if (reaction.message.partial) { try { await reaction.message.fetch(); } catch { return; } }
+
+  const game = [...bjGames.values()].find(g => g.messageId === reaction.message.id && g.userId === user.id);
+  if (!game) return;
+
+  const emoji = reaction.emoji.name;
+  if (emoji !== "⬆️" && emoji !== "🛑") return;
+
+  try { await reaction.users.remove(user.id); } catch {}
+
+  const msg = reaction.message;
+
+  if (emoji === "⬆️") {
+    game.playerHand.push(game.deck.pop());
+    if (bjHandVal(game.playerHand) > 21) {
+      bjGames.delete(game.userId);
+      setBalance(game.userId, getBalance(game.userId) - game.bet);
+      try { await msg.reactions.removeAll(); } catch {}
+      await msg.edit(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\nBUST! -${game.bet} 🪙 | Bakiye: ${getBalance(game.userId)} 🪙`);
+    } else {
+      await msg.edit(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand, true)}\nBahis: ${game.bet} 🪙 | ⬆️ kart çek • 🛑 dur`);
+    }
+  } else if (emoji === "🛑") {
+    bjDealerPlay(game);
+    const result = bjResolve(game);
+    bjGames.delete(game.userId);
+    try { await msg.reactions.removeAll(); } catch {}
+    await msg.edit(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\n${result} | Bakiye: ${getBalance(game.userId)} 🪙`);
   }
 });
 
