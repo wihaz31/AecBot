@@ -977,7 +977,13 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  const isReply = message.reference?.messageId != null;
+  let isReplyToBot = false;
+  if (message.reference?.messageId) {
+    try {
+      const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+      if (refMsg.author.id === client.user.id) isReplyToBot = true;
+    } catch {}
+  }
   let shouldRespond = false;
 
   messageCounter++;
@@ -987,17 +993,10 @@ client.on("messageCreate", async (message) => {
     shouldRespond = true;
   }
 
-  if (isReply || shouldRespond) {
-    let replyTarget = null;
-    if (isReply) {
-      try {
-        replyTarget = await message.channel.messages.fetch(message.reference.messageId);
-      } catch {}
-    }
-
+  if (isReplyToBot || shouldRespond) {
     const recentHistory = await fetchRecentHistory(message.channel, 8);
-    const context = replyTarget
-      ? `${replyTarget.author.username}: ${replyTarget.content}\n${message.author.username}: ${content}`
+    const context = isReplyToBot
+      ? `${message.author.username}: ${content}`
       : content;
 
     const out = await askGemini(context, false, recentHistory);
@@ -1005,7 +1004,7 @@ client.on("messageCreate", async (message) => {
       if (!botRecentSet.has(out)) {
         botRecentSet.add(out);
         if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
-        if (isReply) {
+        if (isReplyToBot) {
           await message.reply(out);
         } else {
           await message.channel.send(out);
@@ -1019,7 +1018,7 @@ client.on("messageCreate", async (message) => {
       if (!botRecentSet.has(markov)) {
         botRecentSet.add(markov);
         if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
-        if (isReply) {
+        if (isReplyToBot) {
           await message.reply(markov);
         } else {
           await message.channel.send(markov);
