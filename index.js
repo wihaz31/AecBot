@@ -326,6 +326,116 @@ function parseBet(str, userId) {
 }
 
 /* =========================
+   CS2 CASE SYSTEM
+========================= */
+const INVENTORY_FILE = path.join(__dirname, "inventory.json");
+let inventory = {};
+function loadInventory() {
+  try { inventory = JSON.parse(fs.readFileSync(INVENTORY_FILE, "utf8")); } catch { inventory = {}; }
+}
+function saveInventory() {
+  fs.writeFileSync(INVENTORY_FILE, JSON.stringify(inventory, null, 2));
+}
+loadInventory();
+
+const RARITY_INFO = {
+  consumer:   { label: "Consumer Grade",   color: "⬜", coinMin: 0,    coinMax: 5    },
+  industrial: { label: "Industrial Grade", color: "🟦", coinMin: 5,    coinMax: 15   },
+  milspec:    { label: "Mil-Spec",          color: "🟪", coinMin: 20,   coinMax: 60   },
+  restricted: { label: "Restricted",        color: "🔵", coinMin: 80,   coinMax: 160  },
+  classified: { label: "Classified",        color: "🩷", coinMin: 200,  coinMax: 400  },
+  covert:     { label: "Covert",            color: "🔴", coinMin: 500,  coinMax: 1000 },
+  knife:      { label: "★ Contraband",      color: "🟡", coinMin: 1500, coinMax: 3000 },
+};
+
+const RARITY_WEIGHTS = [
+  { rarity: "consumer",   w: 7992 },
+  { rarity: "industrial", w: 1598 },
+  { rarity: "milspec",    w: 320  },
+  { rarity: "restricted", w: 64   },
+  { rarity: "classified", w: 26   },
+  { rarity: "covert",     w: 6    },
+  { rarity: "knife",      w: 2    },
+];
+
+function rollRarity() {
+  const total = RARITY_WEIGHTS.reduce((s, x) => s + x.w, 0);
+  let r = Math.floor(Math.random() * total);
+  for (const { rarity, w } of RARITY_WEIGHTS) {
+    if (r < w) return rarity;
+    r -= w;
+  }
+  return "consumer";
+}
+
+const CONDITIONS = [
+  { label: "Factory New",    short: "FN", w: 3  },
+  { label: "Minimal Wear",   short: "MW", w: 24 },
+  { label: "Field-Tested",   short: "FT", w: 33 },
+  { label: "Well-Worn",      short: "WW", w: 24 },
+  { label: "Battle-Scarred", short: "BS", w: 16 },
+];
+
+function rollCondition() {
+  const total = CONDITIONS.reduce((s, x) => s + x.w, 0);
+  let r = Math.floor(Math.random() * total);
+  for (const c of CONDITIONS) {
+    if (r < c.w) return c;
+    r -= c.w;
+  }
+  return CONDITIONS[2];
+}
+
+const CASES = {
+  "recoil": {
+    name: "Recoil Case",
+    cost: 250,
+    skins: {
+      consumer:   ["MP9 | Rose Iron", "MAC-10 | Allure", "P250 | Vino Primo", "Nova | Toy Soldier", "Sawed-Off | Amber Fade"],
+      industrial: ["CZ75-Auto | Distressed", "UMP-45 | Roadblock", "Tec-9 | Decimator", "FAMAS | Meow 36", "MP5-SD | Desert Storm"],
+      milspec:    ["SSG 08 | Parallax", "Glock-18 | Winterized", "Desert Eagle | Trigger Discipline", "AK-47 | Ice Coaled", "M4A4 | 龍王 (Dragon King)", "Five-SeveN | Scrawl", "M4A1-S | Restless"],
+      restricted: ["Galil AR | Connexion", "AWP | Chromatic Aberration", "MP9 | Starlight Protector", "FAMAS | Meltdown", "USP-S | Ticket to Hell"],
+      classified: ["AK-47 | Head Shot", "M4A1-S | Emphorosaur-S", "Desert Eagle | Blue Ply", "M4A4 | Poly Mag"],
+      covert:     ["AK-47 | Baroque Purple", "M4A4 | Recoil"],
+      knife:      ["★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+  "revolution": {
+    name: "Revolution Case",
+    cost: 250,
+    skins: {
+      consumer:   ["MAC-10 | Whitefish", "UMP-45 | Wild Child", "P250 | Vanguard", "Sawed-Off | Spirit Board", "P90 | Maze Solver"],
+      industrial: ["MP9 | Featherweight", "Nova | Windblown", "Tec-9 | Rebel", "XM1014 | Iridescent", "MP5-SD | Liquidation"],
+      milspec:    ["Five-SeveN | Hybrid", "M249 | Downtown", "AUG | Momentum", "MP7 | Abyssal Apparition", "MAC-10 | Light Box", "P90 | Neoqueen", "SSG 08 | Skull Cracker"],
+      restricted: ["Glock-18 | Umbral Rabbit", "FAMAS | Eye of Athena", "M4A4 | Etch Lord", "AK-47 | Inheritance", "Desert Eagle | Printstream"],
+      classified: ["M4A1-S | Blackwater", "MP9 | Hydra"],
+      covert:     ["AK-47 | Head Shot", "M4A4 | Temukau"],
+      knife:      ["★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+  "kilowatt": {
+    name: "Kilowatt Case",
+    cost: 300,
+    skins: {
+      consumer:   ["CZ75-Auto | Capacitor", "P2000 | Elevate", "MP9 | Bioleak", "Sawed-Off | Devourer", "MAC-10 | Graven"],
+      industrial: ["Tec-9 | Slag", "XM1014 | Zombie Offensive", "Nova | Dark Sigil", "UMP-45 | Primal Saber", "P90 | Vent Rush"],
+      milspec:    ["Glock-18 | Block-18", "AUG | Flux", "MP5-SD | Condition Zero", "M249 | Warbird", "FAMAS | Rapid Eye Movement", "Desert Eagle | Trigger Discipline", "SSG 08 | Dezastre"],
+      restricted: ["AWP | Chrome Cannon", "MP7 | Guerrilla", "M4A1-S | Jawbreaker", "AK-47 | Leet Museo", "USP-S | Stainless"],
+      classified: ["M4A1-S | Mecha Industries", "AK-47 | Violet Murano"],
+      covert:     ["M4A4 | Etch Lord", "M4A1-S | Stratocat"],
+      knife:      ["★ Kukri Knife", "★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+};
+
+function addToInventory(userId, username, item) {
+  if (!inventory[userId]) inventory[userId] = { username, items: [] };
+  inventory[userId].username = username;
+  inventory[userId].items.push(item);
+  saveInventory();
+}
+
+/* =========================
    BLACKJACK
 ========================= */
 const bjGames = new Map();
@@ -734,6 +844,9 @@ client.on("messageCreate", async (message) => {
         "`*kelimeson` — kelime oyunu bitir",
         "`*slot [miktar]` — slot makinesi",
         "`*hafıza` — eski bir mesajı hatırla",
+        "`*kasalar` — CS2 kasalarını listele",
+        "`*kasa [recoil|revolution|kilowatt]` — kasa aç",
+        "`*envanter [@kişi]` — CS2 envanteri",
         "`*gökhan`", "`*reaction on/off/status`", "`*seed status`",
       ].join("\n"));
       return;
@@ -951,6 +1064,90 @@ client.on("messageCreate", async (message) => {
       result = `-${bet} 🪙`;
     }
     await message.reply(`[ ${line} ]\n${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
+    return;
+  }
+
+  if (lower === "*kasa" || lower === "*kasalar") {
+    const lines = Object.entries(CASES).map(([key, c]) => {
+      return `**${c.name}** (\`*kasa ${key}\`) — ${c.cost} 🪙`;
+    });
+    await message.reply(`**CS2 Kasaları:**\n${lines.join("\n")}\n\nNadirlık şansları: ⬜ Consumer %79.9 | 🟦 Industrial %16.0 | 🟪 Mil-Spec %3.2 | 🔵 Restricted %0.64 | 🩷 Classified %0.26 | 🔴 Covert %0.064 | 🟡 Knife %0.026`);
+    return;
+  }
+
+  if (lower.startsWith("*kasa ")) {
+    const key = lower.slice(6).trim();
+    const caseData = CASES[key];
+    if (!caseData) {
+      await message.reply(`bilinmeyen kasa. kullanılabilir kasalar: ${Object.keys(CASES).join(", ")}`);
+      return;
+    }
+    const bal = getBalance(message.author.id);
+    if (bal < caseData.cost) {
+      await message.reply(`yetersiz bakiye! Bu kasa ${caseData.cost} 🪙 gerektiriyor. Bakiyen: ${bal} 🪙`);
+      return;
+    }
+    setBalance(message.author.id, bal - caseData.cost);
+
+    const rarity = rollRarity();
+    const skinPool = caseData.skins[rarity];
+    const skin = skinPool[Math.floor(Math.random() * skinPool.length)];
+    const condition = rollCondition();
+    const isStatTrak = ["milspec","restricted","classified","covert","knife"].includes(rarity) && Math.random() < 0.1;
+    const stPrefix = isStatTrak ? "StatTrak™ " : "";
+    const fullName = `${stPrefix}${skin} (${condition.short})`;
+
+    const info = RARITY_INFO[rarity];
+    const range = info.coinMax - info.coinMin;
+    let coinReward = info.coinMin + Math.floor(Math.random() * (range + 1));
+    if (isStatTrak) coinReward = Math.floor(coinReward * 1.5);
+
+    const savesToInventory = ["restricted","classified","covert","knife"].includes(rarity);
+    if (savesToInventory) {
+      addToInventory(message.author.id, message.author.username, {
+        name: fullName,
+        rarity,
+        case: caseData.name,
+        date: new Date().toISOString(),
+      });
+      setBalance(message.author.id, getBalance(message.author.id) + coinReward);
+    }
+
+    const rarityLabel = `${info.color} ${info.label}`;
+    const inventoryNote = savesToInventory ? `\n📦 **Envantere eklendi!** +${coinReward} 🪙 ödül` : `\n+${coinReward} 🪙`;
+    await message.reply(`🎰 **${caseData.name}** açıldı!\n\n${rarityLabel}\n🔫 **${fullName}**${inventoryNote}\n\nYeni bakiye: ${getBalance(message.author.id)} 🪙`);
+    return;
+  }
+
+  if (lower === "*envanter" || lower.startsWith("*envanter ")) {
+    let targetId = message.author.id;
+    let targetName = message.author.username;
+    if (message.mentions.users.size > 0) {
+      const mentioned = message.mentions.users.first();
+      targetId = mentioned.id;
+      targetName = mentioned.username;
+    }
+    const inv = inventory[targetId];
+    if (!inv || inv.items.length === 0) {
+      await message.reply(targetId === message.author.id ? "envanterin boş! kasa açarak nadir skinler kazanabilirsin." : `**${targetName}** kullanıcısının envanteri boş.`);
+      return;
+    }
+    const rarityOrder = ["knife","covert","classified","restricted","milspec"];
+    const sorted = [...inv.items].sort((a, b) => rarityOrder.indexOf(a.rarity) - rarityOrder.indexOf(b.rarity));
+    const lines = sorted.map((item, i) => {
+      const info = RARITY_INFO[item.rarity] || {};
+      return `${i + 1}. ${info.color || ""} ${item.name}`;
+    });
+    const chunks = [];
+    let chunk = [];
+    for (const line of lines) {
+      chunk.push(line);
+      if (chunk.length === 15) { chunks.push(chunk.join("\n")); chunk = []; }
+    }
+    if (chunk.length) chunks.push(chunk.join("\n"));
+    const header = `**${targetName}** envanteri (${sorted.length} item):`;
+    await message.reply(`${header}\n${chunks[0]}`);
+    for (let i = 1; i < chunks.length; i++) await message.channel.send(chunks[i]);
     return;
   }
 
