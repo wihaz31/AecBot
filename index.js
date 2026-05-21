@@ -763,6 +763,7 @@ async function getRobloxPresence() {
     return {
       online: p.userPresenceType > 0,
       inGame: p.userPresenceType === 2,
+      inStudio: p.userPresenceType === 3,
       gameName: p.lastLocation || null,
     };
   } catch {
@@ -1072,7 +1073,14 @@ client.on("messageCreate", async (message) => {
   }
 
   if (lower === "*gökhan" || lower === "*gokhan") {
-    await message.reply("lan gökhan ne yapıyorsun");
+    const presence = await getRobloxPresence();
+    if (!presence) { await message.reply("Roblox durumu çekemedim."); return; }
+    if (!presence.online) { await message.reply("offline."); return; }
+    if (presence.inGame) {
+      await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${presence.gameName || "bilinmiyor"}`);
+    } else {
+      await message.reply("Gökhan Studio'da nabıyon aq.");
+    }
     return;
   }
 
