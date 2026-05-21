@@ -365,13 +365,13 @@ function saveInventory() {
 }
 
 const RARITY_INFO = {
-  consumer:   { label: "Consumer Grade",   color: "⬜", coinMin: 0,    coinMax: 5    },
-  industrial: { label: "Industrial Grade", color: "🟦", coinMin: 5,    coinMax: 15   },
-  milspec:    { label: "Mil-Spec",          color: "🟪", coinMin: 20,   coinMax: 60   },
-  restricted: { label: "Restricted",        color: "🔵", coinMin: 80,   coinMax: 160  },
-  classified: { label: "Classified",        color: "🩷", coinMin: 200,  coinMax: 400  },
-  covert:     { label: "Covert",            color: "🔴", coinMin: 500,  coinMax: 1000 },
-  knife:      { label: "★ Contraband",      color: "🟡", coinMin: 1500, coinMax: 3000 },
+  consumer:   { label: "Consumer Grade",   color: "⬜", coinMin: 1,     coinMax: 5     },
+  industrial: { label: "Industrial Grade", color: "🟦", coinMin: 5,     coinMax: 20    },
+  milspec:    { label: "Mil-Spec",          color: "🟪", coinMin: 20,    coinMax: 80    },
+  restricted: { label: "Restricted",        color: "🔵", coinMin: 200,   coinMax: 400   },
+  classified: { label: "Classified",        color: "🩷", coinMin: 500,   coinMax: 1200  },
+  covert:     { label: "Covert",            color: "🔴", coinMin: 2000,  coinMax: 6000  },
+  knife:      { label: "★ Contraband",      color: "🟡", coinMin: 8000,  coinMax: 30000 },
 };
 
 const RARITY_WEIGHTS = [
@@ -1207,6 +1207,7 @@ client.on("messageCreate", async (message) => {
     if (isStatTrak) coinReward = Math.floor(coinReward * 1.5);
 
     const savesToInventory = ["restricted","classified","covert","knife"].includes(rarity);
+    setBalance(message.author.id, getBalance(message.author.id) + coinReward);
     if (savesToInventory) {
       addToInventory(message.author.id, message.author.username, {
         name: fullName,
@@ -1214,11 +1215,13 @@ client.on("messageCreate", async (message) => {
         case: caseData.name,
         date: new Date().toISOString(),
       });
-      setBalance(message.author.id, getBalance(message.author.id) + coinReward);
     }
 
     const rarityLabel = `${info.color} ${info.label}`;
-    const inventoryNote = savesToInventory ? `\n📦 **Envantere eklendi!** +${coinReward} 🪙 ödül` : `\n+${coinReward} 🪙`;
+    const stNote = isStatTrak ? " *(StatTrak™ +50%)*" : "";
+    const inventoryNote = savesToInventory
+      ? `\n📦 **Envantere eklendi!** +${coinReward} 🪙${stNote}`
+      : `\n+${coinReward} 🪙${stNote}`;
     await message.reply(`🎰 **${caseData.name}** açıldı!\n\n${rarityLabel}\n🔫 **${fullName}**${inventoryNote}\n\nYeni bakiye: ${getBalance(message.author.id)} 🪙`);
     return;
   }
