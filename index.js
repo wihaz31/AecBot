@@ -732,7 +732,8 @@ client.on("messageCreate", async (message) => {
         "`*ver @kişi [miktar]` — para gönder",
         "`*kelime` — kelime oyunu başlat",
         "`*kelimeson` — kelime oyunu bitir",
-        "`*sıralama` — para sıralaması",
+        "`*slot [miktar]` — slot makinesi",
+        "`*hafıza` — eski bir mesajı hatırla",
         "`*gökhan`", "`*reaction on/off/status`", "`*seed status`",
       ].join("\n"));
       return;
@@ -903,6 +904,53 @@ client.on("messageCreate", async (message) => {
       return `${prefix} **${name}** — ${bal} 🪙`;
     }));
     await message.reply("**para sıralaması:**\n" + lines.join("\n"));
+    return;
+  }
+
+  if (lower === "*hafıza" || lower === "*hafiza") {
+    const usable = memory.filter(m => m.includes(": ") && m.length > 15 && m.length < 200);
+    if (usable.length === 0) { await message.reply("henüz hafızam boş"); return; }
+    const entry = usable[Math.floor(Math.random() * usable.length)];
+    const colon = entry.indexOf(": ");
+    const who = entry.slice(0, colon);
+    const said = entry.slice(colon + 2);
+    await message.reply(`bir zamanlar **${who}** şöyle demişti:\n> ${said}`);
+    return;
+  }
+
+  if (lower.startsWith("*slot")) {
+    const parts = content.split(/\s+/);
+    const bet = parseBet(parts[1], message.author.id);
+    if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
+    const symbols = [
+      { e: "🍒", w: 30 }, { e: "🍋", w: 25 }, { e: "🍊", w: 20 },
+      { e: "🍇", w: 15 }, { e: "🔔", w: 6 }, { e: "⭐", w: 3 },
+      { e: "💎", w: 1 }, { e: "7️⃣", w: 1 },
+    ];
+    const totalW = symbols.reduce((s, x) => s + x.w, 0);
+    function spin() {
+      let r = Math.random() * totalW;
+      for (const s of symbols) { r -= s.w; if (r <= 0) return s.e; }
+      return symbols[0].e;
+    }
+    const reels = [spin(), spin(), spin()];
+    const line = reels.join(" | ");
+    const bal = getBalance(message.author.id);
+    let result, delta;
+    if (reels[0] === reels[1] && reels[1] === reels[2]) {
+      const mult = reels[0] === "💎" ? 20 : reels[0] === "7️⃣" ? 10 : reels[0] === "⭐" ? 5 : reels[0] === "🔔" ? 4 : 3;
+      delta = bet * mult - bet;
+      setBalance(message.author.id, bal + delta);
+      result = `🎉 üçlü! x${mult} → +${delta} 🪙`;
+    } else if (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]) {
+      delta = 0;
+      result = `ikili — para iade`;
+    } else {
+      delta = -bet;
+      setBalance(message.author.id, bal - bet);
+      result = `-${bet} 🪙`;
+    }
+    await message.reply(`[ ${line} ]\n${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
     return;
   }
 
