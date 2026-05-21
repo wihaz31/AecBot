@@ -21,7 +21,7 @@ const MAX_MEMORY_MESSAGES = 40000;
 const RECENT_EXCLUDE = 100;
 
 let messageCounter = 0;
-let nextMessageTarget = Math.floor(Math.random() * 31) + 20; // 20–50
+let nextMessageTarget = Math.floor(Math.random() * 31) + 20;
 
 const REPLY_RESPONSE_CHANCE = 1;
 const MENTION_RESPONSE_CHANCE = 1;
@@ -746,7 +746,6 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
 
-  // Redis'ten economy ve inventory yükle
   const [savedEconomy, savedInventory] = await Promise.all([
     redisGet("economy"),
     redisGet("inventory"),
