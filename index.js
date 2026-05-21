@@ -365,13 +365,13 @@ function saveInventory() {
 }
 
 const RARITY_INFO = {
-  consumer:   { label: "Consumer Grade",   color: "⬜", coinMin: 1,     coinMax: 5     },
-  industrial: { label: "Industrial Grade", color: "🟦", coinMin: 5,     coinMax: 20    },
-  milspec:    { label: "Mil-Spec",          color: "🟪", coinMin: 20,    coinMax: 80    },
-  restricted: { label: "Restricted",        color: "🔵", coinMin: 200,   coinMax: 400   },
-  classified: { label: "Classified",        color: "🩷", coinMin: 500,   coinMax: 1200  },
-  covert:     { label: "Covert",            color: "🔴", coinMin: 2000,  coinMax: 6000  },
-  knife:      { label: "★ Contraband",      color: "🟡", coinMin: 8000,  coinMax: 30000 },
+  consumer:   { label: "Consumer Grade",   color: "⬜", coinMin: 3,     coinMax: 8      },
+  industrial: { label: "Industrial Grade", color: "🟦", coinMin: 10,    coinMax: 30     },
+  milspec:    { label: "Mil-Spec",          color: "🟪", coinMin: 40,    coinMax: 120    },
+  restricted: { label: "Restricted",        color: "🔵", coinMin: 200,   coinMax: 600    },
+  classified: { label: "Classified",        color: "🩷", coinMin: 1000,  coinMax: 3000   },
+  covert:     { label: "Covert",            color: "🔴", coinMin: 4000,  coinMax: 12000  },
+  knife:      { label: "★ Contraband",      color: "🟡", coinMin: 15000, coinMax: 50000  },
 };
 
 const RARITY_WEIGHTS = [
@@ -415,7 +415,7 @@ function rollCondition() {
 const CASES = {
   "recoil": {
     name: "Recoil Case",
-    cost: 250,
+    cost: 280,
     skins: {
       consumer:   ["MP9 | Rose Iron", "MAC-10 | Allure", "P250 | Vino Primo", "Nova | Toy Soldier", "Sawed-Off | Amber Fade"],
       industrial: ["CZ75-Auto | Distressed", "UMP-45 | Roadblock", "Tec-9 | Decimator", "FAMAS | Meow 36", "MP5-SD | Desert Storm"],
@@ -428,7 +428,7 @@ const CASES = {
   },
   "revolution": {
     name: "Revolution Case",
-    cost: 250,
+    cost: 275,
     skins: {
       consumer:   ["MAC-10 | Whitefish", "UMP-45 | Wild Child", "P250 | Vanguard", "Sawed-Off | Spirit Board", "P90 | Maze Solver"],
       industrial: ["MP9 | Featherweight", "Nova | Windblown", "Tec-9 | Rebel", "XM1014 | Iridescent", "MP5-SD | Liquidation"],
@@ -441,7 +441,7 @@ const CASES = {
   },
   "kilowatt": {
     name: "Kilowatt Case",
-    cost: 300,
+    cost: 400,
     skins: {
       consumer:   ["CZ75-Auto | Capacitor", "P2000 | Elevate", "MP9 | Bioleak", "Sawed-Off | Devourer", "MAC-10 | Graven"],
       industrial: ["Tec-9 | Slag", "XM1014 | Zombie Offensive", "Nova | Dark Sigil", "UMP-45 | Primal Saber", "P90 | Vent Rush"],
@@ -454,12 +454,12 @@ const CASES = {
   },
   "gamma2": {
     name: "Gamma 2 Case",
-    cost: 250,
+    cost: 300,
     skins: {
       consumer:   ["PP-Bizon | Jungle Slipstream", "Dual Berettas | Cyanospatter", "MP9 | Avalanche", "Nova | Predator", "P250 | Wingshot"],
-      industrial: ["FAMAS | Djinn", "CZ75-Auto | Chalice", "XM1014 | Entombed", "Tec-9 | Re-Entry", "MAC-10 | Heat"],
+      industrial: ["FAMAS | Djinn", "XM1014 | Entombed", "Tec-9 | Re-Entry", "MAC-10 | Heat", "MP9 | Featherweight"],
       milspec:    ["M4A4 | Buzz Kill", "USP-S | Para Green", "SSG 08 | Ghost Crusader", "Glock-18 | Wasteland Rebel", "AK-47 | Neon Revolution", "M4A1-S | Flashback", "FAMAS | Valence"],
-      restricted: ["Desert Eagle | Oxide Blaze", "M4A4 | The Coalition", "AK-47 | Frontside Misty", "Galil AR | Stone Cold", "AWP | Phobos"],
+      restricted: ["Desert Eagle | Oxide Blaze", "M4A4 | The Coalition", "AK-47 | Frontside Misty", "Galil AR | Stone Cold", "AWP | Phobos", "CZ75-Auto | Chalice"],
       classified: ["AK-47 | Wasteland Rebel", "M4A1-S | Hyper Beast", "Dual Berettas | Retribution"],
       covert:     ["AK-47 | Neon Rider", "M4A4 | Neo-Noir"],
       knife:      ["★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
@@ -467,7 +467,7 @@ const CASES = {
   },
   "dreams": {
     name: "Dreams & Nightmares Case",
-    cost: 250,
+    cost: 300,
     skins: {
       consumer:   ["Dual Berettas | Melondrama", "MP5-SD | Necro Jr.", "UMP-45 | Oscillator", "MAC-10 | Ensnared", "Nova | Bloomstick"],
       industrial: ["P250 | Visions", "CZ75-Auto | Emerald Quartz", "Glock-18 | Night", "FAMAS | Doomkitty", "Tec-9 | Bamboozle"],
@@ -480,7 +480,7 @@ const CASES = {
   },
   "chroma": {
     name: "Chroma 2 Case",
-    cost: 200,
+    cost: 285,
     skins: {
       consumer:   ["Five-SeveN | Violent Daimyo", "MP7 | Gunsmoke", "P2000 | Panther", "P250 | See Ya Later", "Sawed-Off | Snake Camo"],
       industrial: ["AUG | Aristocrat", "MAC-10 | Neon Rider", "Nova | Antique", "Tec-9 | Titanium Bit", "XM1014 | Red Python"],
@@ -493,9 +493,9 @@ const CASES = {
   },
   "cobblestone": {
     name: "Cobblestone Souvenir Package",
-    cost: 500,
+    cost: 1000,
     skins: {
-      consumer:   ["PP-Bizon | Sand Dashed", "P250 | Valence", "Five-SeveN | Violent Daimyo", "Desert Eagle | Cobalt Disruption", "CZ75-Auto | Chalice"],
+      consumer:   ["PP-Bizon | Sand Dashed", "P250 | Valence", "Five-SeveN | Violent Daimyo", "Desert Eagle | Cobalt Disruption", "CZ75-Auto | Army Mesh"],
       industrial: ["XM1014 | Grassland", "MP7 | Armor Core", "Galil AR | Shattered", "M249 | System Lock", "SG 553 | Pulse"],
       milspec:    ["P2000 | Pathfinder", "FAMAS | Spitfire", "M4A1-S | Bright Water", "AK-47 | Carbone Fiber", "Glock-18 | Bunsen Burner", "Nova | Antique", "P90 | Trigon"],
       restricted: ["M4A4 | Faded Zebra", "AK-47 | Safari Mesh", "MP7 | Forest DDPAT", "USP-S | Forest Leaves", "SSG 08 | Abyss"],
