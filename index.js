@@ -46,6 +46,10 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
 let geminiFileUri = null;
 
+// Upstash Redis
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL || "";
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+
 /* =========================
    SEED DURUMU
 ========================= */
@@ -121,6 +125,31 @@ async function fetchWithTimeout(url, options = {}, ms = 8000) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function redisGet(key) {
+  if (!UPSTASH_URL) return null;
+  try {
+    const r = await fetchWithTimeout(UPSTASH_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(["GET", key]),
+    }, 5000);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data.result ? JSON.parse(data.result) : null;
+  } catch { return null; }
+}
+
+async function redisSet(key, value) {
+  if (!UPSTASH_URL) return;
+  try {
+    await fetchWithTimeout(UPSTASH_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(["SET", key, JSON.stringify(value)]),
+    }, 5000);
+  } catch {}
 }
 
 /* =========================
@@ -287,7 +316,6 @@ function randomSentence() {
 /* =========================
    EKONOMİ
 ========================= */
-const ECONOMY_FILE = path.join(__dirname, "economy.json");
 const DEFAULT_BALANCE = 1000;
 const BONUS_AMOUNT = 500;
 const BONUS_COOLDOWN = 24 * 60 * 60 * 1000;
@@ -295,16 +323,13 @@ const BONUS_COOLDOWN = 24 * 60 * 60 * 1000;
 const balances = new Map();
 const lastBonus = new Map();
 
-try {
-  const raw = fs.readFileSync(ECONOMY_FILE, "utf8");
-  for (const [k, v] of Object.entries(JSON.parse(raw))) balances.set(k, Number(v));
-  console.log(`[EKONOMİ] ${balances.size} kullanıcı yüklendi`);
-} catch {}
-
+let economySaveTimer = null;
 function saveEconomy() {
-  try {
-    fs.writeFileSync(ECONOMY_FILE, JSON.stringify(Object.fromEntries(balances)));
-  } catch {}
+  if (economySaveTimer) clearTimeout(economySaveTimer);
+  economySaveTimer = setTimeout(() => {
+    redisSet("economy", Object.fromEntries(balances));
+    economySaveTimer = null;
+  }, 3000);
 }
 
 function getBalance(userId) {
@@ -329,15 +354,15 @@ function parseBet(str, userId) {
 /* =========================
    CS2 CASE SYSTEM
 ========================= */
-const INVENTORY_FILE = path.join(__dirname, "inventory.json");
 let inventory = {};
-function loadInventory() {
-  try { inventory = JSON.parse(fs.readFileSync(INVENTORY_FILE, "utf8")); } catch { inventory = {}; }
-}
+let inventorySaveTimer = null;
 function saveInventory() {
-  fs.writeFileSync(INVENTORY_FILE, JSON.stringify(inventory, null, 2));
+  if (inventorySaveTimer) clearTimeout(inventorySaveTimer);
+  inventorySaveTimer = setTimeout(() => {
+    redisSet("inventory", inventory);
+    inventorySaveTimer = null;
+  }, 3000);
 }
-loadInventory();
 
 const RARITY_INFO = {
   consumer:   { label: "Consumer Grade",   color: "⬜", coinMin: 0,    coinMax: 5    },
@@ -721,6 +746,22 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
 
+  // Redis'ten economy ve inventory yükle
+  const [savedEconomy, savedInventory] = await Promise.all([
+    redisGet("economy"),
+    redisGet("inventory"),
+  ]);
+  if (savedEconomy) {
+    for (const [k, v] of Object.entries(savedEconomy)) balances.set(k, Number(v));
+    console.log(`[EKONOMİ] ${balances.size} kullanıcı Redis'ten yüklendi`);
+  } else {
+    console.log(`[EKONOMİ] Redis'te veri yok, sıfırdan başlıyor`);
+  }
+  if (savedInventory) {
+    inventory = savedInventory;
+    console.log(`[ENVANTER] Redis'ten yüklendi`);
+  }
+
   try {
     const channel = await client.channels.fetch(SEED_CHANNEL_ID);
     if (channel?.isTextBased()) {
@@ -880,6 +921,17 @@ client.on("messageCreate", async (message) => {
     if (lower === "*gemini test") {
       const out = await askGemini("Merhaba, nasılsın?", false);
       await message.reply(out ? `Gemini: ${out}` : "Gemini yanıt vermedi (key kontrol et)");
+      return;
+    }
+    if (lower === "*redis test") {
+      if (!UPSTASH_URL) { await message.reply("UPSTASH_REDIS_REST_URL env var eksik"); return; }
+      try {
+        await redisSet("ping", { ts: Date.now() });
+        const result = await redisGet("ping");
+        await message.reply(result ? `Redis bağlantısı OK ✅\n${balances.size} kullanıcı bakiyede, ${Object.keys(inventory).length} envanter kaydı` : "Redis set OK ama get null döndü ❌");
+      } catch (e) {
+        await message.reply(`Redis hatası ❌: ${e.message}`);
+      }
       return;
     }
     if (lower === "*yardim" || lower === "*help") {
