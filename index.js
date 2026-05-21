@@ -5,6 +5,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const fs = require("fs");
+const path = require("path");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 
@@ -286,7 +287,7 @@ function randomSentence() {
 /* =========================
    EKONOMİ
 ========================= */
-const ECONOMY_FILE = "economy.json";
+const ECONOMY_FILE = path.join(__dirname, "economy.json");
 const DEFAULT_BALANCE = 1000;
 const BONUS_AMOUNT = 500;
 const BONUS_COOLDOWN = 24 * 60 * 60 * 1000;
@@ -424,6 +425,58 @@ const CASES = {
       classified: ["M4A1-S | Mecha Industries", "AK-47 | Violet Murano"],
       covert:     ["M4A4 | Etch Lord", "M4A1-S | Stratocat"],
       knife:      ["★ Kukri Knife", "★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+  "gamma2": {
+    name: "Gamma 2 Case",
+    cost: 250,
+    skins: {
+      consumer:   ["PP-Bizon | Jungle Slipstream", "Dual Berettas | Cyanospatter", "MP9 | Avalanche", "Nova | Predator", "P250 | Wingshot"],
+      industrial: ["FAMAS | Djinn", "CZ75-Auto | Chalice", "XM1014 | Entombed", "Tec-9 | Re-Entry", "MAC-10 | Heat"],
+      milspec:    ["M4A4 | Buzz Kill", "USP-S | Para Green", "SSG 08 | Ghost Crusader", "Glock-18 | Wasteland Rebel", "AK-47 | Neon Revolution", "M4A1-S | Flashback", "FAMAS | Valence"],
+      restricted: ["Desert Eagle | Oxide Blaze", "M4A4 | The Coalition", "AK-47 | Frontside Misty", "Galil AR | Stone Cold", "AWP | Phobos"],
+      classified: ["AK-47 | Wasteland Rebel", "M4A1-S | Hyper Beast", "Dual Berettas | Retribution"],
+      covert:     ["AK-47 | Neon Rider", "M4A4 | Neo-Noir"],
+      knife:      ["★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+  "dreams": {
+    name: "Dreams & Nightmares Case",
+    cost: 250,
+    skins: {
+      consumer:   ["Dual Berettas | Melondrama", "MP5-SD | Necro Jr.", "UMP-45 | Oscillator", "MAC-10 | Ensnared", "Nova | Bloomstick"],
+      industrial: ["P250 | Visions", "CZ75-Auto | Emerald Quartz", "Glock-18 | Night", "FAMAS | Doomkitty", "Tec-9 | Bamboozle"],
+      milspec:    ["XM1014 | Zombie Offensive", "MP7 | Neon Ply", "M4A4 | Tooth Fairy", "USP-S | Monster Mashup", "AK-47 | Phantom Disruptor", "M4A1-S | Night Terror", "Galil AR | Akoben"],
+      restricted: ["AWP | No Pray No Spray", "M4A1-S | Darkness Falls", "AK-47 | Legion of Anubis", "MP9 | Starlight Protector", "P90 | Neoqueen"],
+      classified: ["AK-47 | Nightwish", "M4A4 | Spider Lily"],
+      covert:     ["AK-47 | X-Ray", "M4A4 | Temukau"],
+      knife:      ["★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+  "chroma": {
+    name: "Chroma 2 Case",
+    cost: 200,
+    skins: {
+      consumer:   ["Five-SeveN | Violent Daimyo", "MP7 | Gunsmoke", "P2000 | Panther", "P250 | See Ya Later", "Sawed-Off | Snake Camo"],
+      industrial: ["AUG | Aristocrat", "MAC-10 | Neon Rider", "Nova | Antique", "Tec-9 | Titanium Bit", "XM1014 | Red Python"],
+      milspec:    ["M4A4 | Radiation Hazard", "P90 | Shallow Grave", "AK-47 | Carbone Fiber", "Desert Eagle | Bronze Deco", "USP-S | Torque", "Galil AR | Eco", "CZ75-Auto | Imprint"],
+      restricted: ["AK-47 | Elite Build", "M4A1-S | Icarus Fell", "SG 553 | Cyrex", "Glock-18 | Catacombs", "AWP | Pit Viper"],
+      classified: ["M4A1-S | Bright Water", "Galil AR | Crimson Tsunami"],
+      covert:     ["AK-47 | Hydroponic", "M4A4 | Desolate Space"],
+      knife:      ["★ Bayonet", "★ Flip Knife", "★ Gut Knife", "★ Karambit", "★ M9 Bayonet", "★ Huntsman Knife", "★ Falchion Knife", "★ Shadow Daggers", "★ Bowie Knife", "★ Butterfly Knife", "★ Talon Knife", "★ Navaja Knife", "★ Stiletto Knife", "★ Ursus Knife", "★ Classic Knife", "★ Paracord Knife", "★ Survival Knife", "★ Nomad Knife", "★ Skeleton Knife"],
+    },
+  },
+  "cobblestone": {
+    name: "Cobblestone Souvenir Package",
+    cost: 500,
+    skins: {
+      consumer:   ["PP-Bizon | Sand Dashed", "P250 | Valence", "Five-SeveN | Violent Daimyo", "Desert Eagle | Cobalt Disruption", "CZ75-Auto | Chalice"],
+      industrial: ["XM1014 | Grassland", "MP7 | Armor Core", "Galil AR | Shattered", "M249 | System Lock", "SG 553 | Pulse"],
+      milspec:    ["P2000 | Pathfinder", "FAMAS | Spitfire", "M4A1-S | Bright Water", "AK-47 | Carbone Fiber", "Glock-18 | Bunsen Burner", "Nova | Antique", "P90 | Trigon"],
+      restricted: ["M4A4 | Faded Zebra", "AK-47 | Safari Mesh", "MP7 | Forest DDPAT", "USP-S | Forest Leaves", "SSG 08 | Abyss"],
+      classified: ["M4A1-S | Master Piece", "P90 | Death by Kitty"],
+      covert:     ["M4A4 | Howl"],
+      knife:      ["★ AWP | Dragon Lore"],
     },
   },
 };
@@ -845,7 +898,7 @@ client.on("messageCreate", async (message) => {
         "`*slot [miktar]` — slot makinesi",
         "`*hafıza` — eski bir mesajı hatırla",
         "`*kasalar` — CS2 kasalarını listele",
-        "`*kasa [recoil|revolution|kilowatt]` — kasa aç",
+        "`*kasa [recoil|revolution|kilowatt|gamma2|dreams|chroma|cobblestone]` — kasa aç",
         "`*envanter [@kişi]` — CS2 envanteri",
         "`*gökhan`", "`*reaction on/off/status`", "`*seed status`",
       ].join("\n"));
