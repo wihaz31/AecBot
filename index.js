@@ -175,6 +175,13 @@ function foldTR(s) {
     .replace(/ç/g, "c");
 }
 
+function turkishLower(s) {
+  return (s || "")
+    .replace(/İ/g, "i")
+    .replace(/I/g, "ı")
+    .toLowerCase();
+}
+
 function isWordOnly(s) {
   return /^[a-zğüşıöç]+$/.test(s);
 }
@@ -1167,21 +1174,27 @@ client.on("messageCreate", async (message) => {
 
   if (wordGames.has(message.channelId) && !message.mentions.has(client.user)) {
     const game = wordGames.get(message.channelId);
-    const word = content.trim().toLowerCase();
+    const word = turkishLower(content.trim());
     if (isWordOnly(word)) {
       if (message.author.id === game.lastPlayerId) {
         await message.react("🚫");
+        await message.reply("aynı kişi üst üste oynayamaz!");
         return;
       }
-      if (foldTR(word[0]) !== foldTR(game.requiredLetter) || game.usedWords.has(word)) {
+      if (game.usedWords.has(word)) {
         await message.react("❌");
+        await message.reply(`**${word}** zaten kullanıldı!`);
+      } else if (word[0] !== game.requiredLetter) {
+        await message.react("❌");
+        await message.reply(`kelime **'${game.requiredLetter}'** harfiyle başlamalı! ('${word}' geçersiz)`);
       } else if (wordLastLetter(word) === "ğ") {
         await message.react("❌");
-        await message.reply("ğ ile başlayan kelime yok, çıkmaz sokak");
+        await message.reply("ğ ile biten kelime kabul edilmez, çıkmaz sokak!");
       } else {
         const valid = await isTurkishWord(word);
         if (!valid) {
           await message.react("❌");
+          await message.reply(`**${word}** TDK'da bulunamadı!`);
         } else {
           game.usedWords.add(word);
           game.lastWord = word;
@@ -1291,7 +1304,7 @@ client.on("messageCreate", async (message) => {
     const lines = Object.entries(CASES).map(([key, c]) => {
       return `**${c.name}** (\`*kasa ${key}\`) — ${c.cost} 🪙`;
     });
-    await message.reply(`**CS2 Kasaları:**\n${lines.join("\n")}\n\nNadirlık şansları: ⬜ Consumer %79.9 | 🟦 Industrial %16.0 | 🟪 Mil-Spec %3.2 | 🔵 Restricted %0.64 | 🩷 Classified %0.26 | 🔴 Covert %0.064 | 🟡 Knife %0.026`);
+    await message.reply(`**CS2 Kasaları:**\n${lines.join("\n")}\n\nNadirlik şansları: ⬜ Consumer %79.9 | 🟦 Industrial %16.0 | 🟪 Mil-Spec %3.2 | 🔵 Restricted %0.64 | 🩷 Classified %0.26 | 🔴 Covert %0.064 | 🟡 Knife %0.026`);
     return;
   }
 
