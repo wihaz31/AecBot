@@ -175,6 +175,13 @@ function foldTR(s) {
     .replace(/ç/g, "c");
 }
 
+function turkishLower(s) {
+  return (s || "")
+    .replace(/İ/g, "i")
+    .replace(/I/g, "ı")
+    .toLowerCase();
+}
+
 function isWordOnly(s) {
   return /^[a-zğüşıöç]+$/.test(s);
 }
@@ -384,6 +391,114 @@ const RARITY_WEIGHTS = [
   { rarity: "knife",      w: 2    },
 ];
 
+const COIN_RATE = 100;
+
+const CONDITION_COIN_MULT = { FN: 1.00, MW: 0.55, FT: 0.28, WW: 0.18, BS: 0.12 };
+
+const SKIN_PRICES = {
+  // Recoil Case
+  "MP9 | Rose Iron": 0.05, "MAC-10 | Allure": 0.06, "P250 | Vino Primo": 0.04,
+  "Nova | Toy Soldier": 0.05, "Sawed-Off | Amber Fade": 0.05,
+  "CZ75-Auto | Distressed": 0.08, "UMP-45 | Roadblock": 0.09,
+  "Tec-9 | Decimator": 0.07, "FAMAS | Meow 36": 0.07, "MP5-SD | Desert Storm": 0.08,
+  "SSG 08 | Parallax": 0.50, "Glock-18 | Winterized": 0.30,
+  "Desert Eagle | Trigger Discipline": 1.50, "AK-47 | Ice Coaled": 0.60,
+  "M4A4 | 龍王 (Dragon King)": 3.00, "Five-SeveN | Scrawl": 0.25, "M4A1-S | Restless": 0.40,
+  "Galil AR | Connexion": 1.00, "AWP | Chromatic Aberration": 3.00,
+  "MP9 | Starlight Protector": 2.00, "FAMAS | Meltdown": 1.00, "USP-S | Ticket to Hell": 8.00,
+  "AK-47 | Head Shot": 45.00, "M4A1-S | Emphorosaur-S": 55.00,
+  "Desert Eagle | Blue Ply": 15.00, "M4A4 | Poly Mag": 12.00,
+  "AK-47 | Baroque Purple": 120.00, "M4A4 | Recoil": 90.00,
+
+  // Revolution Case
+  "MAC-10 | Whitefish": 0.04, "UMP-45 | Wild Child": 0.05, "P250 | Vanguard": 0.04,
+  "Sawed-Off | Spirit Board": 0.05, "P90 | Maze Solver": 0.06,
+  "MP9 | Featherweight": 0.08, "Nova | Windblown": 0.06, "Tec-9 | Rebel": 0.07,
+  "XM1014 | Iridescent": 0.06, "MP5-SD | Liquidation": 0.07,
+  "Five-SeveN | Hybrid": 0.40, "M249 | Downtown": 0.20, "AUG | Momentum": 0.35,
+  "MP7 | Abyssal Apparition": 0.30, "MAC-10 | Light Box": 0.25,
+  "P90 | Neoqueen": 1.50, "SSG 08 | Skull Cracker": 0.35,
+  "Glock-18 | Umbral Rabbit": 3.00, "FAMAS | Eye of Athena": 1.50,
+  "M4A4 | Etch Lord": 8.00, "AK-47 | Inheritance": 5.00,
+  "Desert Eagle | Printstream": 25.00,
+  "M4A1-S | Blackwater": 25.00, "MP9 | Hydra": 6.00,
+  "M4A4 | Temukau": 70.00,
+
+  // Kilowatt Case
+  "CZ75-Auto | Capacitor": 0.05, "P2000 | Elevate": 0.04, "MP9 | Bioleak": 0.05,
+  "Sawed-Off | Devourer": 0.05, "MAC-10 | Graven": 0.05,
+  "Tec-9 | Slag": 0.07, "XM1014 | Zombie Offensive": 0.06, "Nova | Dark Sigil": 0.07,
+  "UMP-45 | Primal Saber": 0.08, "P90 | Vent Rush": 0.07,
+  "Glock-18 | Block-18": 0.50, "AUG | Flux": 0.30, "MP5-SD | Condition Zero": 0.35,
+  "M249 | Warbird": 0.25, "FAMAS | Rapid Eye Movement": 0.40, "SSG 08 | Dezastre": 0.40,
+  "AWP | Chrome Cannon": 4.00, "MP7 | Guerrilla": 1.50,
+  "M4A1-S | Jawbreaker": 5.00, "AK-47 | Leet Museo": 6.00, "USP-S | Stainless": 3.00,
+  "M4A1-S | Mecha Industries": 30.00, "AK-47 | Violet Murano": 20.00,
+  "M4A1-S | Stratocat": 90.00,
+
+  // Gamma 2 Case
+  "PP-Bizon | Jungle Slipstream": 0.04, "Dual Berettas | Cyanospatter": 0.05,
+  "MP9 | Avalanche": 0.05, "Nova | Predator": 0.05, "P250 | Wingshot": 0.04,
+  "FAMAS | Djinn": 0.08, "XM1014 | Entombed": 0.06,
+  "Tec-9 | Re-Entry": 0.07, "MAC-10 | Heat": 0.07,
+  "M4A4 | Buzz Kill": 0.80, "USP-S | Para Green": 0.50, "SSG 08 | Ghost Crusader": 0.40,
+  "Glock-18 | Wasteland Rebel": 1.00, "AK-47 | Neon Revolution": 1.50,
+  "M4A1-S | Flashback": 0.60, "FAMAS | Valence": 0.35,
+  "Desert Eagle | Oxide Blaze": 2.00, "M4A4 | The Coalition": 2.50,
+  "AK-47 | Frontside Misty": 3.00, "Galil AR | Stone Cold": 1.50,
+  "AWP | Phobos": 3.50, "CZ75-Auto | Chalice": 40.00,
+  "AK-47 | Wasteland Rebel": 10.00, "M4A1-S | Hyper Beast": 25.00,
+  "Dual Berettas | Retribution": 5.00,
+  "AK-47 | Neon Rider": 55.00, "M4A4 | Neo-Noir": 45.00,
+
+  // Dreams & Nightmares Case
+  "Dual Berettas | Melondrama": 0.05, "MP5-SD | Necro Jr.": 0.05,
+  "UMP-45 | Oscillator": 0.05, "MAC-10 | Ensnared": 0.05, "Nova | Bloomstick": 0.04,
+  "P250 | Visions": 0.07, "CZ75-Auto | Emerald Quartz": 0.08,
+  "Glock-18 | Night": 0.07, "FAMAS | Doomkitty": 0.07, "Tec-9 | Bamboozle": 0.07,
+  "MP7 | Neon Ply": 0.35, "M4A4 | Tooth Fairy": 0.80, "USP-S | Monster Mashup": 0.50,
+  "AK-47 | Phantom Disruptor": 0.60, "M4A1-S | Night Terror": 0.80, "Galil AR | Akoben": 0.30,
+  "AWP | No Pray No Spray": 3.00, "M4A1-S | Darkness Falls": 4.00,
+  "AK-47 | Legion of Anubis": 5.00,
+  "AK-47 | Nightwish": 8.00, "M4A4 | Spider Lily": 18.00,
+  "AK-47 | X-Ray": 150.00,
+
+  // Chroma 2 Case
+  "Five-SeveN | Violent Daimyo": 0.05, "MP7 | Gunsmoke": 0.06,
+  "P2000 | Panther": 0.05, "P250 | See Ya Later": 0.05, "Sawed-Off | Snake Camo": 0.04,
+  "AUG | Aristocrat": 0.08, "MAC-10 | Neon Rider": 0.09, "Nova | Antique": 0.07,
+  "Tec-9 | Titanium Bit": 0.07, "XM1014 | Red Python": 0.08,
+  "M4A4 | Radiation Hazard": 0.50, "P90 | Shallow Grave": 0.35,
+  "AK-47 | Carbone Fiber": 0.40, "Desert Eagle | Bronze Deco": 0.60,
+  "USP-S | Torque": 0.50, "Galil AR | Eco": 0.30, "CZ75-Auto | Imprint": 0.35,
+  "AK-47 | Elite Build": 2.50, "M4A1-S | Icarus Fell": 3.00, "SG 553 | Cyrex": 2.50,
+  "Glock-18 | Catacombs": 1.50, "AWP | Pit Viper": 4.00,
+  "M4A1-S | Bright Water": 10.00, "Galil AR | Crimson Tsunami": 8.00,
+  "AK-47 | Hydroponic": 45.00, "M4A4 | Desolate Space": 40.00,
+
+  // Cobblestone Souvenir Package
+  "PP-Bizon | Sand Dashed": 0.04, "P250 | Valence": 0.05,
+  "Desert Eagle | Cobalt Disruption": 0.10, "CZ75-Auto | Army Mesh": 0.05,
+  "XM1014 | Grassland": 0.07, "MP7 | Armor Core": 0.08, "Galil AR | Shattered": 0.07,
+  "M249 | System Lock": 0.08, "SG 553 | Pulse": 0.07,
+  "P2000 | Pathfinder": 0.40, "FAMAS | Spitfire": 0.35,
+  "Glock-18 | Bunsen Burner": 0.40, "P90 | Trigon": 0.50,
+  "M4A4 | Faded Zebra": 2.00, "AK-47 | Safari Mesh": 1.00,
+  "MP7 | Forest DDPAT": 0.80, "USP-S | Forest Leaves": 1.50, "SSG 08 | Abyss": 1.50,
+  "M4A1-S | Master Piece": 250.00, "P90 | Death by Kitty": 10.00,
+  "M4A4 | Howl": 2000.00,
+
+  // Knives
+  "★ Bayonet": 130, "★ Flip Knife": 130, "★ Gut Knife": 90,
+  "★ Karambit": 400, "★ M9 Bayonet": 200, "★ Huntsman Knife": 120,
+  "★ Falchion Knife": 100, "★ Shadow Daggers": 80, "★ Bowie Knife": 100,
+  "★ Butterfly Knife": 350, "★ Talon Knife": 180, "★ Navaja Knife": 80,
+  "★ Stiletto Knife": 100, "★ Ursus Knife": 110, "★ Classic Knife": 110,
+  "★ Paracord Knife": 90, "★ Survival Knife": 90, "★ Nomad Knife": 100,
+  "★ Skeleton Knife": 150, "★ Kukri Knife": 120,
+  "★ AWP | Dragon Lore": 1500,
+};
+
 function rollRarity() {
   const total = RARITY_WEIGHTS.reduce((s, x) => s + x.w, 0);
   let r = Math.floor(Math.random() * total);
@@ -579,17 +694,30 @@ const wordGames = new Map();
 const tdkCache = new Map();
 
 async function isTurkishWord(word) {
-  const key = foldTR(word);
+  const key = turkishLower(word);
   if (tdkCache.has(key)) return tdkCache.get(key);
   try {
+    // Try GTS (Güncel Türkçe Sözlük) first
     const r = await fetchWithTimeout(
       `https://sozluk.gov.tr/gts?ara=${encodeURIComponent(word)}`,
       {},
       5000
     );
-    if (!r.ok) return true;
+    if (!r.ok) { tdkCache.set(key, true); return true; }
     const data = await r.json();
-    const valid = Array.isArray(data) && data.length > 0;
+    if (Array.isArray(data) && data.length > 0) {
+      tdkCache.set(key, true);
+      return true;
+    }
+    // Fallback: try YS (Yazım Sözlüğü) — covers words not in GTS
+    const r2 = await fetchWithTimeout(
+      `https://sozluk.gov.tr/yazim?ara=${encodeURIComponent(word)}`,
+      {},
+      5000
+    );
+    if (!r2.ok) { tdkCache.set(key, true); return true; }
+    const data2 = await r2.json();
+    const valid = Array.isArray(data2) && data2.length > 0;
     tdkCache.set(key, valid);
     return valid;
   } catch {
@@ -655,6 +783,7 @@ async function getRobloxPresence() {
     return {
       online: p.userPresenceType > 0,
       inGame: p.userPresenceType === 2,
+      inStudio: p.userPresenceType === 3,
       gameName: p.lastLocation || null,
     };
   } catch {
@@ -964,7 +1093,14 @@ client.on("messageCreate", async (message) => {
   }
 
   if (lower === "*gökhan" || lower === "*gokhan") {
-    await message.reply("lan gökhan ne yapıyorsun");
+    const presence = await getRobloxPresence();
+    if (!presence) { await message.reply("Roblox durumu çekemedim."); return; }
+    if (!presence.online) { await message.reply("offline."); return; }
+    if (presence.inGame) {
+      await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${presence.gameName || "bilinmiyor"}`);
+    } else {
+      await message.reply("Gökhan Studio'da nabıyon aq.");
+    }
     return;
   }
 
@@ -1051,21 +1187,27 @@ client.on("messageCreate", async (message) => {
 
   if (wordGames.has(message.channelId) && !message.mentions.has(client.user)) {
     const game = wordGames.get(message.channelId);
-    const word = content.trim().toLowerCase();
+    const word = turkishLower(content.trim());
     if (isWordOnly(word)) {
       if (message.author.id === game.lastPlayerId) {
         await message.react("🚫");
+        await message.reply("aynı kişi üst üste oynayamaz!");
         return;
       }
-      if (foldTR(word[0]) !== foldTR(game.requiredLetter) || game.usedWords.has(word)) {
+      if (game.usedWords.has(word)) {
         await message.react("❌");
+        await message.reply(`**${word}** zaten kullanıldı!`);
+      } else if (word[0] !== game.requiredLetter) {
+        await message.react("❌");
+        await message.reply(`kelime **'${game.requiredLetter}'** harfiyle başlamalı! ('${word}' geçersiz)`);
       } else if (wordLastLetter(word) === "ğ") {
         await message.react("❌");
-        await message.reply("ğ ile başlayan kelime yok, çıkmaz sokak");
+        await message.reply("ğ ile biten kelime kabul edilmez, çıkmaz sokak!");
       } else {
         const valid = await isTurkishWord(word);
         if (!valid) {
           await message.react("❌");
+          await message.reply(`**${word}** TDK'da bulunamadı!`);
         } else {
           game.usedWords.add(word);
           game.lastWord = word;
@@ -1175,7 +1317,7 @@ client.on("messageCreate", async (message) => {
     const lines = Object.entries(CASES).map(([key, c]) => {
       return `**${c.name}** (\`*kasa ${key}\`) — ${c.cost} 🪙`;
     });
-    await message.reply(`**CS2 Kasaları:**\n${lines.join("\n")}\n\nNadirlık şansları: ⬜ Consumer %79.9 | 🟦 Industrial %16.0 | 🟪 Mil-Spec %3.2 | 🔵 Restricted %0.64 | 🩷 Classified %0.26 | 🔴 Covert %0.064 | 🟡 Knife %0.026`);
+    await message.reply(`**CS2 Kasaları:**\n${lines.join("\n")}\n\nNadirlik şansları: ⬜ Consumer %79.9 | 🟦 Industrial %16.0 | 🟪 Mil-Spec %3.2 | 🔵 Restricted %0.64 | 🩷 Classified %0.26 | 🔴 Covert %0.064 | 🟡 Knife %0.026`);
     return;
   }
 
@@ -1202,8 +1344,14 @@ client.on("messageCreate", async (message) => {
     const fullName = `${stPrefix}${skin} (${condition.short})`;
 
     const info = RARITY_INFO[rarity];
-    const range = info.coinMax - info.coinMin;
-    let coinReward = info.coinMin + Math.floor(Math.random() * (range + 1));
+    const basePrice = SKIN_PRICES[skin];
+    let coinReward;
+    if (basePrice !== undefined) {
+      const condMult = CONDITION_COIN_MULT[condition.short] ?? 0.28;
+      coinReward = Math.max(info.coinMin, Math.round(basePrice * condMult * COIN_RATE));
+    } else {
+      coinReward = info.coinMin + Math.floor(Math.random() * (info.coinMax - info.coinMin + 1));
+    }
     if (isStatTrak) coinReward = Math.floor(coinReward * 1.5);
 
     const savesToInventory = ["restricted","classified","covert","knife"].includes(rarity);
@@ -1366,7 +1514,7 @@ client.on("messageCreate", async (message) => {
     }
 
     const markov = generateMarkov();
-    if (markov) {
+    if (markov && markov.split(" ").length >= 5) {
       if (!botRecentSet.has(markov)) {
         botRecentSet.add(markov);
         if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
