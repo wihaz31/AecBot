@@ -694,17 +694,30 @@ const wordGames = new Map();
 const tdkCache = new Map();
 
 async function isTurkishWord(word) {
-  const key = foldTR(word);
+  const key = turkishLower(word);
   if (tdkCache.has(key)) return tdkCache.get(key);
   try {
+    // Try GTS (Güncel Türkçe Sözlük) first
     const r = await fetchWithTimeout(
       `https://sozluk.gov.tr/gts?ara=${encodeURIComponent(word)}`,
       {},
       5000
     );
-    if (!r.ok) return true;
+    if (!r.ok) { tdkCache.set(key, true); return true; }
     const data = await r.json();
-    const valid = Array.isArray(data) && data.length > 0;
+    if (Array.isArray(data) && data.length > 0) {
+      tdkCache.set(key, true);
+      return true;
+    }
+    // Fallback: try YS (Yazım Sözlüğü) — covers words not in GTS
+    const r2 = await fetchWithTimeout(
+      `https://sozluk.gov.tr/yazim?ara=${encodeURIComponent(word)}`,
+      {},
+      5000
+    );
+    if (!r2.ok) { tdkCache.set(key, true); return true; }
+    const data2 = await r2.json();
+    const valid = Array.isArray(data2) && data2.length > 0;
     tdkCache.set(key, valid);
     return valid;
   } catch {
