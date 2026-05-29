@@ -1140,36 +1140,37 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
-    if (lower === "*yardim" || lower === "*help") {
-      await message.reply([
-        "**komutlar:**",
-        "`*ai [mesaj]` — yapay zeka",
-        "`*bakiye` / `*para` — para bakiyesi",
-        "`*bonus` — günlük 500 🪙",
-        "`*zar [miktar]` — zar bahsi",
-        "`*tura [miktar] yazı/tura` — yazı tura",
-        "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
-        "`*bj [miktar]` — blackjack (⬆️ kart • 🛑 dur)",
-        "`*ver @kişi [miktar]` — para gönder",
-        "`*çal [youtube url]` — müzik çal",
-        "`*dur` / `*devam` / `*atla` / `*kuyruk` / `*çık` — müzik kontrol",
-        "`*kelime` — kelime oyunu başlat",
-        "`*kelimeson` — kelime oyunu bitir",
-        "`*slot [miktar]` — slot makinesi",
-        "`*hafıza` — eski bir mesajı hatırla",
-        "`*kasalar` — CS2 kasalarını listele",
-        "`*kasa [recoil|revolution|kilowatt|gamma2|dreams|chroma|cobblestone]` — kasa aç",
-        "`*envanter [@kişi]` — CS2 envanteri",
-        "`*gökhan`", "`*reaction on/off/status`", "`*seed status`",
-      ].join("\n"));
-      return;
-    }
     if (isDM && !lower.startsWith("*")) {
       console.log(`DM from admin: ${content}`);
       const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
       if (targetChannel?.isTextBased()) await targetChannel.send(content);
       return;
     }
+  }
+
+  if (lower === "*yardim" || lower === "*help") {
+    await message.reply([
+      "**komutlar:**",
+      "`*ai [mesaj]` — yapay zeka",
+      "`*bakiye` / `*para` — para bakiyesi",
+      "`*bonus` — günlük 500 🪙",
+      "`*zar [miktar]` — zar bahsi",
+      "`*tura [miktar] yazı/tura` — yazı tura",
+      "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
+      "`*bj [miktar]` — blackjack (⬆️ kart • 🛑 dur)",
+      "`*ver @kişi [miktar]` — para gönder",
+      "`*çal [şarkı adı / YouTube URL / Spotify URL]` — müzik çal",
+      "`*dur` / `*devam` / `*atla` / `*kuyruk` / `*çık` — müzik kontrol",
+      "`*kelime` — kelime oyunu başlat",
+      "`*kelimeson` — kelime oyunu bitir",
+      "`*slot [miktar]` — slot makinesi",
+      "`*hafıza` — eski bir mesajı hatırla",
+      "`*kasalar` — CS2 kasalarını listele",
+      "`*kasa [recoil|revolution|kilowatt|gamma2|dreams|chroma|cobblestone]` — kasa aç",
+      "`*envanter [@kişi]` — CS2 envanteri",
+      "`*gökhan`",
+    ].join("\n"));
+    return;
   }
 
   if (lower.startsWith("çal ", 1) || lower.startsWith("cal ", 1)) {
