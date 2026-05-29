@@ -939,18 +939,23 @@ client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
   setInterval(checkKick, 2 * 60 * 1000);
   checkKick();
+  const playdlToken = {};
+  if (process.env.YOUTUBE_COOKIE) {
+    playdlToken.youtube = { cookie: process.env.YOUTUBE_COOKIE };
+  }
   if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+    playdlToken.spotify = {
+      client_id: process.env.SPOTIFY_CLIENT_ID,
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET,
+      refresh_token: "",
+      access_token: "",
+    };
+  }
+  if (Object.keys(playdlToken).length > 0) {
     try {
-      await playdl.setToken({
-        spotify: {
-          client_id: process.env.SPOTIFY_CLIENT_ID,
-          client_secret: process.env.SPOTIFY_CLIENT_SECRET,
-          refresh_token: "",
-          access_token: "",
-        },
-      });
-      console.log("[MÜZİK] Spotify bağlantısı hazır");
-    } catch { console.log("[MÜZİK] Spotify token ayarlanamadı"); }
+      await playdl.setToken(playdlToken);
+      console.log("[MÜZİK] play-dl token ayarlandı:", Object.keys(playdlToken).join(", "));
+    } catch { console.log("[MÜZİK] play-dl token ayarlanamadı"); }
   }
 
   const [savedEconomy, savedInventory] = await Promise.all([
