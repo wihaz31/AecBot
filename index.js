@@ -804,7 +804,13 @@ const musicQueues = new Map();
 const YT_COOKIE_FILE = "/tmp/yt-cookies.txt";
 if (process.env.YOUTUBE_COOKIE) {
   try {
-    fs.writeFileSync(YT_COOKIE_FILE, process.env.YOUTUBE_COOKIE.replace(/\\n/g, "\n"));
+    let content = process.env.YOUTUBE_COOKIE.replace(/\\n/g, "\n");
+    if (!content.includes("\n")) {
+      // Koyeb env var satır sonlarını boşluğa çevirmiş — düzelt
+      const entries = content.split(/ (?=\.youtube\.com\t)/);
+      content = "# Netscape HTTP Cookie File\n" + entries.join("\n");
+    }
+    fs.writeFileSync(YT_COOKIE_FILE, content);
   } catch {}
 }
 function ytdlpCookieArgs() {
