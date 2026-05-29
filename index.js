@@ -700,7 +700,7 @@ const wordGames = new Map();
 const tdkCache = new Map();
 
 async function isTurkishWord(word) {
-  const key = foldTR(word);
+  const key = turkishLower(word);
   if (tdkCache.has(key)) return tdkCache.get(key);
   try {
     const r = await fetchWithTimeout(
@@ -708,9 +708,20 @@ async function isTurkishWord(word) {
       {},
       5000
     );
-    if (!r.ok) return true;
+    if (!r.ok) { tdkCache.set(key, true); return true; }
     const data = await r.json();
-    const valid = Array.isArray(data) && data.length > 0;
+    if (Array.isArray(data) && data.length > 0) {
+      tdkCache.set(key, true);
+      return true;
+    }
+    const r2 = await fetchWithTimeout(
+      `https://sozluk.gov.tr/yazim?ara=${encodeURIComponent(word)}`,
+      {},
+      5000
+    );
+    if (!r2.ok) { tdkCache.set(key, true); return true; }
+    const data2 = await r2.json();
+    const valid = Array.isArray(data2) && data2.length > 0;
     tdkCache.set(key, valid);
     return valid;
   } catch {
@@ -785,6 +796,64 @@ async function getRobloxPresence() {
 }
 
 /* =========================
+   MÜZİK
+========================= */
+const musicQueues = new Map();
+
+async function playNext(guildId) {
+  const state = musicQueues.get(guildId);
+  if (!state) return;
+  if (state.queue.length === 0) {
+    state.current = null;
+    try { state.connection.destroy(); } catch {}
+    musicQueues.delete(guildId);
+    return;
+  }
+  const song = state.queue.shift();
+  state.current = song;
+  try {
+    const stream = ytdl(song.url, { filter: "audioonly", quality: "lowestaudio", highWaterMark: 1 << 25 });
+    const resource = createAudioResource(stream);
+    state.player.play(resource);
+    if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
+  } catch {
+    if (state.textChannel) await state.textChannel.send("❌ Çalarken hata oluştu, atlanıyor...");
+    playNext(guildId);
+  }
+}
+
+/* =========================
+   KİCK BİLDİRİMİ
+========================= */
+let kickWasLive = false;
+
+async function checkKick() {
+  try {
+    const r = await fetchWithTimeout(
+      `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
+      { headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0" } },
+      8000
+    );
+    if (!r.ok) return;
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("json")) return;
+    const data = await r.json();
+    const isLive = !!data.livestream;
+    if (isLive && !kickWasLive) {
+      kickWasLive = true;
+      try {
+        const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
+        if (ch?.isTextBased()) {
+          await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
+        }
+      } catch {}
+    } else if (!isLive) {
+      kickWasLive = false;
+    }
+  } catch {}
+}
+
+/* =========================
    GEMİNİ
 ========================= */
 async function uploadMemoryToGemini() {
@@ -849,64 +918,6 @@ async function askGemini(prompt, useFile = false, recentHistory = "") {
   } catch {
     return null;
   }
-}
-
-/* =========================
-   MÜZİK
-========================= */
-const musicQueues = new Map();
-
-async function playNext(guildId) {
-  const state = musicQueues.get(guildId);
-  if (!state) return;
-  if (state.queue.length === 0) {
-    state.current = null;
-    try { state.connection.destroy(); } catch {}
-    musicQueues.delete(guildId);
-    return;
-  }
-  const song = state.queue.shift();
-  state.current = song;
-  try {
-    const stream = ytdl(song.url, { filter: "audioonly", quality: "lowestaudio", highWaterMark: 1 << 25 });
-    const resource = createAudioResource(stream);
-    state.player.play(resource);
-    if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
-  } catch {
-    if (state.textChannel) await state.textChannel.send("❌ Çalarken hata oluştu, atlanıyor...");
-    playNext(guildId);
-  }
-}
-
-/* =========================
-   KİCK BİLDİRİMİ
-========================= */
-let kickWasLive = false;
-
-async function checkKick() {
-  try {
-    const r = await fetchWithTimeout(
-      `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
-      { headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0" } },
-      8000
-    );
-    if (!r.ok) return;
-    const ct = r.headers.get("content-type") || "";
-    if (!ct.includes("json")) return;
-    const data = await r.json();
-    const isLive = !!data.livestream;
-    if (isLive && !kickWasLive) {
-      kickWasLive = true;
-      try {
-        const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
-        if (ch?.isTextBased()) {
-          await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
-        }
-      } catch {}
-    } else if (!isLive) {
-      kickWasLive = false;
-    }
-  } catch {}
 }
 
 /* =========================
@@ -1148,19 +1159,14 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  if (lower.startsWith("*çal ") || lower.startsWith("*cal ")) {
+  if (lower.startsWith("çal ", 1) || lower.startsWith("cal ", 1)) {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) { await message.reply("Bir ses kanalında olman gerekiyor!"); return; }
     const query = content.slice(content.indexOf(" ") + 1).trim();
     if (!query) { await message.reply("Kullanım: `*çal [youtube url]`"); return; }
     if (!ytdl.validateURL(query)) { await message.reply("Geçerli bir YouTube URL'si gir!"); return; }
     let info;
-    try {
-      info = await ytdl.getBasicInfo(query);
-    } catch {
-      await message.reply("Video bilgisi alınamadı.");
-      return;
-    }
+    try { info = await ytdl.getBasicInfo(query); } catch { await message.reply("Video bilgisi alınamadı."); return; }
     const song = { url: query, title: info.videoDetails.title };
     if (!musicQueues.has(message.guildId)) {
       const connection = joinVoiceChannel({
@@ -1178,7 +1184,7 @@ client.on("messageCreate", async (message) => {
     if (!state.current) {
       playNext(message.guildId);
     } else {
-      await message.reply(`➕ Kuyruğa eklendi: **${song.title}**`);
+      await message.reply(`➕ Kayruga eklendi: **${song.title}**`);
     }
     return;
   }
@@ -1187,7 +1193,7 @@ client.on("messageCreate", async (message) => {
     const state = musicQueues.get(message.guildId);
     if (!state?.current) { await message.reply("Şu an çalan bir şey yok."); return; }
     state.player.pause();
-    await message.reply("⏸️ Duraklatıldı.");
+    await message.reply("⏸️ Duraklatldı.");
     return;
   }
 
