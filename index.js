@@ -9,7 +9,7 @@ const path = require("path");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require("@discordjs/voice");
-const ytdl = require("@distube/ytdl-core");
+const playdl = require("play-dl");
 
 /* =========================
    AYARLAR
@@ -812,8 +812,8 @@ async function playNext(guildId) {
   const song = state.queue.shift();
   state.current = song;
   try {
-    const stream = ytdl(song.url, { filter: "audioonly", quality: "lowestaudio", highWaterMark: 1 << 25 });
-    const resource = createAudioResource(stream);
+    const stream = await playdl.stream(song.url);
+    const resource = createAudioResource(stream.stream, { inputType: stream.type });
     state.player.play(resource);
     if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
   } catch {
@@ -939,6 +939,19 @@ client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
   setInterval(checkKick, 2 * 60 * 1000);
   checkKick();
+  if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+    try {
+      await playdl.setToken({
+        spotify: {
+          client_id: process.env.SPOTIFY_CLIENT_ID,
+          client_secret: process.env.SPOTIFY_CLIENT_SECRET,
+          refresh_token: "",
+          access_token: "",
+        },
+      });
+      console.log("[MÜZİK] Spotify bağlantısı hazır");
+    } catch { console.log("[MÜZİK] Spotify token ayarlanamadı"); }
+  }
 
   const [savedEconomy, savedInventory] = await Promise.all([
     redisGet("economy"),
@@ -1163,11 +1176,28 @@ client.on("messageCreate", async (message) => {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) { await message.reply("Bir ses kanalında olman gerekiyor!"); return; }
     const query = content.slice(content.indexOf(" ") + 1).trim();
-    if (!query) { await message.reply("Kullanım: `*çal [youtube url]`"); return; }
-    if (!ytdl.validateURL(query)) { await message.reply("Geçerli bir YouTube URL'si gir!"); return; }
-    let info;
-    try { info = await ytdl.getBasicInfo(query); } catch { await message.reply("Video bilgisi alınamadı."); return; }
-    const song = { url: query, title: info.videoDetails.title };
+    if (!query) { await message.reply("Kullanım: `*çal [şarkı adı / YouTube URL / Spotify URL]`"); return; }
+    let song;
+    try {
+      const urlType = await playdl.validate(query);
+      if (urlType === "yt_video") {
+        const info = await playdl.video_info(query);
+        song = { url: query, title: info.video_details.title };
+      } else if (urlType === "sp_track") {
+        const spData = await playdl.spotify(query);
+        const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ""}`.trim();
+        const results = await playdl.search(searchQ, { source: { youtube: "video" }, limit: 1 });
+        if (!results.length) { await message.reply("Spotify şarkısı YouTube'da bulunamadı."); return; }
+        song = { url: results[0].url, title: `${spData.name}${spData.artists?.[0]?.name ? " - " + spData.artists[0].name : ""}` };
+      } else {
+        const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
+        if (!results.length) { await message.reply("Sonuç bulunamadı."); return; }
+        song = { url: results[0].url, title: results[0].title };
+      }
+    } catch {
+      await message.reply("Şarkı bilgisi alınamadı.");
+      return;
+    }
     if (!musicQueues.has(message.guildId)) {
       const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
@@ -1184,7 +1214,7 @@ client.on("messageCreate", async (message) => {
     if (!state.current) {
       playNext(message.guildId);
     } else {
-      await message.reply(`➕ Kayruga eklendi: **${song.title}**`);
+      await message.reply(`➕ Kuyruğa eklendi: **${song.title}**`);
     }
     return;
   }
