@@ -820,7 +820,7 @@ function ytdlpCookieArgs() {
 function ytdlpGetInfo(url) {
   return new Promise((resolve, reject) => {
     let stderr = "";
-    const args = ["--no-playlist", "--print", "%(title)s", "--no-warnings", ...ytdlpCookieArgs(), url];
+    const args = ["--no-playlist", "--print", "%(title)s", "--no-warnings", "--socket-timeout", "20", ...ytdlpCookieArgs(), url];
     const proc = spawn("yt-dlp", args);
     let stdout = "";
     proc.stdout.on("data", d => { stdout += d; });
@@ -830,14 +830,14 @@ function ytdlpGetInfo(url) {
       resolve(stdout.trim());
     });
     proc.on("error", reject);
-    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 15000);
+    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 30000);
   });
 }
 
 function ytdlpSearch(query) {
   return new Promise((resolve, reject) => {
     let stderr = "";
-    const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s", "--no-warnings", ...ytdlpCookieArgs(), `ytsearch1:${query}`];
+    const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s", "--no-warnings", "--socket-timeout", "20", ...ytdlpCookieArgs(), `ytsearch1:${query}`];
     const proc = spawn("yt-dlp", args);
     let stdout = "";
     proc.stdout.on("data", d => { stdout += d; });
@@ -849,7 +849,7 @@ function ytdlpSearch(query) {
       resolve({ title: lines[0], url: lines[1] });
     });
     proc.on("error", reject);
-    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 15000);
+    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 30000);
   });
 }
 
