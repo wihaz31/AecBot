@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require("@discordjs/voice");
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require("@discordjs/voice");
 const playdl = require("play-dl");
 
 /* =========================
@@ -803,24 +803,29 @@ const musicQueues = new Map();
 async function playNext(guildId) {
   const state = musicQueues.get(guildId);
   if (!state) return;
+  
   if (state.queue.length === 0) {
     state.current = null;
     try { state.connection.destroy(); } catch {}
     musicQueues.delete(guildId);
     return;
   }
+  
   const song = state.queue.shift();
   state.current = song;
+  
   try {
-    const stream = await playdl.stream(song.url);
+    const stream = await playdl.stream(song.url, { discordPlayerCompatibility: true });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     state.player.play(resource);
     if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
-  } catch {
-    if (state.textChannel) await state.textChannel.send("❌ Çalarken hata oluştu, atlanıyor...");
+  } catch (e) {
+    console.error(`[MÜZİK HATA] ${song.url} çalınamadı:`, e.message);
+    if (state.textChannel) await state.textChannel.send("❌ Bu şarkı çalınamıyor, atlanıyor...");
     playNext(guildId);
   }
 }
+
 
 /* =========================
    KİCK BİLDİRİMİ
@@ -1175,9 +1180,23 @@ client.on("messageCreate", async (message) => {
 
   if (lower.startsWith("*çal ") || lower.startsWith("*cal ")) {
     const voiceChannel = message.member?.voice?.channel;
-    if (!voiceChannel) { await message.reply("Bir ses kanalında olman gerekiyor!"); return; }
+    if (!voiceChannel) { 
+      await message.reply("Bir ses kanalında olman gerekiyor!"); 
+      return;
+    }
+
+    const botVoiceChannel = message.guild.members.me?.voice?.channel;
+    if (botVoiceChannel && voiceChannel.id !== botVoiceChannel.id) {
+      await message.reply("Benimle aynı ses kanalında olmalısın!");
+      return;
+    }
+
     const query = content.slice(content.indexOf(" ") + 1).trim();
-    if (!query) { await message.reply("Kullanım: `*çal [şarkı adı / YouTube URL / Spotify URL]`"); return; }
+    if (!query) { 
+      await message.reply("Kullanım: `*çal [şarkı adı / YouTube URL / Spotify URL]`"); 
+      return;
+    }
+
     let song;
     try {
       const urlType = await playdl.validate(query);
@@ -1188,30 +1207,50 @@ client.on("messageCreate", async (message) => {
         const spData = await playdl.spotify(query);
         const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ""}`.trim();
         const results = await playdl.search(searchQ, { source: { youtube: "video" }, limit: 1 });
-        if (!results.length) { await message.reply("Spotify şarkısı YouTube'da bulunamadı."); return; }
+        if (!results.length) { 
+          await message.reply("Spotify şarkısı YouTube'da bulunamadı."); 
+          return; 
+        }
         song = { url: results[0].url, title: `${spData.name}${spData.artists?.[0]?.name ? " - " + spData.artists[0].name : ""}` };
+      } else if (urlType === "sp_album" || urlType === "sp_playlist") {
+        await message.reply("Şu an için Spotify çalma listelerini desteklemiyorum, lütfen tek bir şarkı linki at.");
+        return;
       } else {
         const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
-        if (!results.length) { await message.reply("Sonuç bulunamadı."); return; }
+        if (!results.length) { 
+          await message.reply("Sonuç bulunamadı."); 
+          return; 
+        }
         song = { url: results[0].url, title: results[0].title };
       }
-    } catch {
-      await message.reply("Şarkı bilgisi alınamadı.");
+    } catch (e) {
+      console.error("[MÜZİK ARAMA HATA]:", e.message);
+      await message.reply("Şarkı bilgisi alınamadı. Linki kontrol et.");
       return;
     }
+
     if (!musicQueues.has(message.guildId)) {
       const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: message.guildId,
         adapterCreator: message.guild.voiceAdapterCreator,
       });
+
+      connection.on(VoiceConnectionStatus.Disconnected, () => {
+        try { connection.destroy(); } catch {}
+        musicQueues.delete(message.guildId);
+      });
+
       const player = createAudioPlayer();
       connection.subscribe(player);
       player.on(AudioPlayerStatus.Idle, () => playNext(message.guildId));
+      
       musicQueues.set(message.guildId, { connection, player, queue: [], current: null, textChannel: message.channel });
     }
+
     const state = musicQueues.get(message.guildId);
     state.queue.push(song);
+    
     if (!state.current) {
       playNext(message.guildId);
     } else {
@@ -1219,6 +1258,7 @@ client.on("messageCreate", async (message) => {
     }
     return;
   }
+
 
   if (lower === "*dur") {
     const state = musicQueues.get(message.guildId);
