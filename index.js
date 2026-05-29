@@ -8,8 +8,9 @@ const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require("@discordjs/voice");
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const playdl = require("play-dl");
+const { execFile, spawn } = require("child_process");
 
 /* =========================
    AYARLAR
@@ -800,6 +801,39 @@ async function getRobloxPresence() {
 ========================= */
 const musicQueues = new Map();
 
+function ytdlpGetInfo(url) {
+  return new Promise((resolve, reject) => {
+    execFile("yt-dlp", ["--no-playlist", "--print", "%(title)s", "--no-warnings", url], { timeout: 15000 }, (err, stdout) => {
+      if (err) return reject(err);
+      resolve(stdout.trim());
+    });
+  });
+}
+
+function ytdlpSearch(query) {
+  return new Promise((resolve, reject) => {
+    execFile("yt-dlp", [
+      "--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s",
+      "--no-warnings", `ytsearch1:${query}`
+    ], { timeout: 15000 }, (err, stdout) => {
+      if (err) return reject(err);
+      const lines = stdout.trim().split("\n");
+      if (lines.length < 2) return reject(new Error("Sonuç bulunamadı"));
+      resolve({ title: lines[0], url: lines[1] });
+    });
+  });
+}
+
+function ytdlpCreateResource(url) {
+  const ytdlp = spawn("yt-dlp", ["-f", "bestaudio[ext=webm]/bestaudio/best", "-o", "-", "--quiet", "--no-playlist", url]);
+  const ffmpeg = spawn("ffmpeg", ["-i", "pipe:0", "-vn", "-f", "ogg", "-acodec", "libopus", "-ar", "48000", "-ac", "2", "-loglevel", "error", "pipe:1"]);
+  ytdlp.stdout.pipe(ffmpeg.stdin);
+  ytdlp.stderr.on("data", () => {});
+  ffmpeg.stderr.on("data", () => {});
+  ytdlp.on("error", () => ffmpeg.kill());
+  return createAudioResource(ffmpeg.stdout, { inputType: StreamType.OggOpus });
+}
+
 async function playNext(guildId) {
   const state = musicQueues.get(guildId);
   if (!state) return;
@@ -812,8 +846,7 @@ async function playNext(guildId) {
   const song = state.queue.shift();
   state.current = song;
   try {
-    const stream = await playdl.stream(song.url);
-    const resource = createAudioResource(stream.stream, { inputType: stream.type });
+    const resource = ytdlpCreateResource(song.url);
     state.player.play(resource);
     if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
   } catch {
@@ -1187,21 +1220,19 @@ client.on("messageCreate", async (message) => {
     try {
       const urlType = await playdl.validate(query);
       if (urlType === "yt_video") {
-        const info = await playdl.video_info(query);
-        song = { url: query, title: info.video_details.title };
+        const title = await ytdlpGetInfo(query);
+        song = { url: query, title: title || query };
       } else if (urlType === "sp_track") {
         const spData = await playdl.spotify(query);
         const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ""}`.trim();
-        const results = await playdl.search(searchQ, { source: { youtube: "video" }, limit: 1 });
-        if (!results.length) { await message.reply("Spotify şarkısı YouTube'da bulunamadı."); return; }
-        song = { url: results[0].url, title: `${spData.name}${spData.artists?.[0]?.name ? " - " + spData.artists[0].name : ""}` };
+        const result = await ytdlpSearch(searchQ);
+        song = { url: result.url, title: `${spData.name}${spData.artists?.[0]?.name ? " - " + spData.artists[0].name : ""}` };
       } else {
-        const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
-        if (!results.length) { await message.reply("Sonuç bulunamadı."); return; }
-        song = { url: results[0].url, title: results[0].title };
+        const result = await ytdlpSearch(query);
+        song = result;
       }
     } catch {
-      await message.reply("Şarkı bilgisi alınamadı.");
+      await message.reply("Şarkı bulunamadı.");
       return;
     }
     if (!musicQueues.has(message.guildId)) {
