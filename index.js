@@ -1231,8 +1231,13 @@ client.on("messageCreate", async (message) => {
         const result = await ytdlpSearch(query);
         song = result;
       }
-    } catch {
-      await message.reply("Şarkı bulunamadı.");
+    } catch (e) {
+      const msg = e?.message || "";
+      if (msg.includes("ENOENT") || msg.includes("not found") || msg.includes("spawn")) {
+        await message.reply("❌ yt-dlp kurulu değil, sunucuyu yeniden başlat.");
+      } else {
+        await message.reply(`❌ Şarkı bulunamadı: ${msg.slice(0, 100)}`);
+      }
       return;
     }
     if (!musicQueues.has(message.guildId)) {
