@@ -817,23 +817,18 @@ function ytdlpCookieArgs() {
   return process.env.YOUTUBE_COOKIE ? ["--cookies", YT_COOKIE_FILE] : [];
 }
 
-function ytdlpGetInfo(url) {
-  return new Promise((resolve, reject) => {
-    let stderr = "";
-    const args = ["--no-playlist", "--print", "%(title)s", "--no-warnings",
-      "--extractor-args", "youtube:player_client=android,web",
-      "--socket-timeout", "10", ...ytdlpCookieArgs(), url];
-    const proc = spawn("yt-dlp", args);
-    let stdout = "";
-    proc.stdout.on("data", d => { stdout += d; });
-    proc.stderr.on("data", d => { stderr += d; });
-    proc.on("close", code => {
-      if (code !== 0) return reject(new Error(stderr.slice(0, 200) || "yt-dlp hata kodu: " + code));
-      resolve(stdout.trim());
-    });
-    proc.on("error", reject);
-    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 20000);
-  });
+async function ytdlpGetInfo(url) {
+  try {
+    const r = await fetchWithTimeout(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
+      {}, 5000
+    );
+    if (r.ok) {
+      const data = await r.json();
+      return data.title || url;
+    }
+  } catch {}
+  return url;
 }
 
 function ytdlpSearch(query) {
