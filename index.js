@@ -852,20 +852,24 @@ function ytdlpSearch(query) {
   });
 }
 
-function ytdlpCreateResource(url) {
-  const ytdlp = spawn("yt-dlp", ["-f", "bestaudio/best", "-o", "-", "--quiet", "--no-playlist",
-    "--extractor-args", "youtube:player_client=android,web",
-    ...ytdlpCookieArgs(), url]);
+async function ytdlpCreateResource(url) {
+  const audioUrl = await new Promise((resolve, reject) => {
+    execFile("yt-dlp", [
+      "--get-url", "-f", "bestaudio/best", "--no-playlist",
+      "--extractor-args", "youtube:player_client=android,web",
+      ...ytdlpCookieArgs(), url
+    ], { timeout: 20000 }, (err, stdout) => {
+      if (err) return reject(err);
+      resolve(stdout.trim().split("\n")[0]);
+    });
+  });
   const ffmpeg = spawn("ffmpeg", [
-    "-analyzeduration", "0", "-probesize", "32",
-    "-i", "pipe:0",
+    "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+    "-i", audioUrl,
     "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
     "-loglevel", "error", "pipe:1"
   ]);
-  ytdlp.stdout.pipe(ffmpeg.stdin);
-  ytdlp.stderr.on("data", () => {});
   ffmpeg.stderr.on("data", () => {});
-  ytdlp.on("error", () => ffmpeg.kill());
   return createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw });
 }
 
@@ -881,7 +885,7 @@ async function playNext(guildId) {
   const song = state.queue.shift();
   state.current = song;
   try {
-    const resource = ytdlpCreateResource(song.url);
+    const resource = await ytdlpCreateResource(song.url);
     state.player.play(resource);
     if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
   } catch {
