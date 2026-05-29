@@ -8,6 +8,8 @@ const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require("@discordjs/voice");
+const playdl = require("play-dl");
 
 /* =========================
    AYARLAR
@@ -36,6 +38,10 @@ const EMOJI_2 = "🪢";
 // HTTP / CMD
 const PORT = process.env.PORT || 8000;
 const CMD_KEY = process.env.CMD_KEY || "";
+
+// Kick
+const KICK_CHANNEL_SLUG = "zeitnot";
+const KICK_NOTIFY_CHANNEL_ID = "705537838770421761";
 
 // Roblox
 const ROBLOX_USER_ID = "2575829815";
@@ -697,7 +703,6 @@ async function isTurkishWord(word) {
   const key = turkishLower(word);
   if (tdkCache.has(key)) return tdkCache.get(key);
   try {
-    // Try GTS (Güncel Türkçe Sözlük) first
     const r = await fetchWithTimeout(
       `https://sozluk.gov.tr/gts?ara=${encodeURIComponent(word)}`,
       {},
@@ -709,7 +714,6 @@ async function isTurkishWord(word) {
       tdkCache.set(key, true);
       return true;
     }
-    // Fallback: try YS (Yazım Sözlüğü) — covers words not in GTS
     const r2 = await fetchWithTimeout(
       `https://sozluk.gov.tr/yazim?ara=${encodeURIComponent(word)}`,
       {},
@@ -792,6 +796,64 @@ async function getRobloxPresence() {
 }
 
 /* =========================
+   MÜZİK
+========================= */
+const musicQueues = new Map();
+
+async function playNext(guildId) {
+  const state = musicQueues.get(guildId);
+  if (!state) return;
+  if (state.queue.length === 0) {
+    state.current = null;
+    try { state.connection.destroy(); } catch {}
+    musicQueues.delete(guildId);
+    return;
+  }
+  const song = state.queue.shift();
+  state.current = song;
+  try {
+    const stream = await playdl.stream(song.url);
+    const resource = createAudioResource(stream.stream, { inputType: stream.type });
+    state.player.play(resource);
+    if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
+  } catch {
+    if (state.textChannel) await state.textChannel.send("❌ Çalarken hata oluştu, atlanıyor...");
+    playNext(guildId);
+  }
+}
+
+/* =========================
+   KİCK BİLDİRİMİ
+========================= */
+let kickWasLive = false;
+
+async function checkKick() {
+  try {
+    const r = await fetchWithTimeout(
+      `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
+      { headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0" } },
+      8000
+    );
+    if (!r.ok) return;
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("json")) return;
+    const data = await r.json();
+    const isLive = !!data.livestream;
+    if (isLive && !kickWasLive) {
+      kickWasLive = true;
+      try {
+        const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
+        if (ch?.isTextBased()) {
+          await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
+        }
+      } catch {}
+    } else if (!isLive) {
+      kickWasLive = false;
+    }
+  } catch {}
+}
+
+/* =========================
    GEMİNİ
 ========================= */
 async function uploadMemoryToGemini() {
@@ -868,12 +930,28 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildVoiceStates,
   ],
   partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
+  setInterval(checkKick, 2 * 60 * 1000);
+  checkKick();
+  if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+    try {
+      await playdl.setToken({
+        spotify: {
+          client_id: process.env.SPOTIFY_CLIENT_ID,
+          client_secret: process.env.SPOTIFY_CLIENT_SECRET,
+          refresh_token: "",
+          access_token: "",
+        },
+      });
+      console.log("[MÜZİK] Spotify bağlantısı hazır");
+    } catch { console.log("[MÜZİK] Spotify token ayarlanamadı"); }
+  }
 
   const [savedEconomy, savedInventory] = await Promise.all([
     redisGet("economy"),
@@ -1062,34 +1140,128 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
-    if (lower === "*yardim" || lower === "*help") {
-      await message.reply([
-        "**komutlar:**",
-        "`*ai [mesaj]` — yapay zeka",
-        "`*bakiye` / `*para` — para bakiyesi",
-        "`*bonus` — günlük 500 🪙",
-        "`*zar [miktar]` — zar bahsi",
-        "`*tura [miktar] yazı/tura` — yazı tura",
-        "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
-        "`*bj [miktar]` — blackjack (⬆️ kart • 🛑 dur)",
-        "`*ver @kişi [miktar]` — para gönder",
-        "`*kelime` — kelime oyunu başlat",
-        "`*kelimeson` — kelime oyunu bitir",
-        "`*slot [miktar]` — slot makinesi",
-        "`*hafıza` — eski bir mesajı hatırla",
-        "`*kasalar` — CS2 kasalarını listele",
-        "`*kasa [recoil|revolution|kilowatt|gamma2|dreams|chroma|cobblestone]` — kasa aç",
-        "`*envanter [@kişi]` — CS2 envanteri",
-        "`*gökhan`", "`*reaction on/off/status`", "`*seed status`",
-      ].join("\n"));
-      return;
-    }
     if (isDM && !lower.startsWith("*")) {
       console.log(`DM from admin: ${content}`);
       const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
       if (targetChannel?.isTextBased()) await targetChannel.send(content);
       return;
     }
+  }
+
+  if (lower === "*yardim" || lower === "*yardım" || lower === "*help") {
+    await message.reply([
+      "**komutlar:**",
+      "`*ai [mesaj]` — yapay zeka",
+      "`*bakiye` / `*para` — para bakiyesi",
+      "`*bonus` — günlük 500 🪙",
+      "`*zar [miktar]` — zar bahsi",
+      "`*tura [miktar] yazı/tura` — yazı tura",
+      "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
+      "`*bj [miktar]` — blackjack (⬆️ kart • 🛑 dur)",
+      "`*ver @kişi [miktar]` — para gönder",
+      "`*çal [şarkı adı / YouTube URL / Spotify URL]` — müzik çal",
+      "`*dur` / `*devam` / `*atla` / `*kuyruk` / `*çık` — müzik kontrol",
+      "`*kelime` — kelime oyunu başlat",
+      "`*kelimeson` — kelime oyunu bitir",
+      "`*slot [miktar]` — slot makinesi",
+      "`*hafıza` — eski bir mesajı hatırla",
+      "`*kasalar` — CS2 kasalarını listele",
+      "`*kasa [recoil|revolution|kilowatt|gamma2|dreams|chroma|cobblestone]` — kasa aç",
+      "`*envanter [@kişi]` — CS2 envanteri",
+      "`*gökhan`",
+    ].join("\n"));
+    return;
+  }
+
+  if (lower.startsWith("*çal ") || lower.startsWith("*cal ")) {
+    const voiceChannel = message.member?.voice?.channel;
+    if (!voiceChannel) { await message.reply("Bir ses kanalında olman gerekiyor!"); return; }
+    const query = content.slice(content.indexOf(" ") + 1).trim();
+    if (!query) { await message.reply("Kullanım: `*çal [şarkı adı / YouTube URL / Spotify URL]`"); return; }
+    let song;
+    try {
+      const urlType = await playdl.validate(query);
+      if (urlType === "yt_video") {
+        const info = await playdl.video_info(query);
+        song = { url: query, title: info.video_details.title };
+      } else if (urlType === "sp_track") {
+        const spData = await playdl.spotify(query);
+        const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ""}`.trim();
+        const results = await playdl.search(searchQ, { source: { youtube: "video" }, limit: 1 });
+        if (!results.length) { await message.reply("Spotify şarkısı YouTube'da bulunamadı."); return; }
+        song = { url: results[0].url, title: `${spData.name}${spData.artists?.[0]?.name ? " - " + spData.artists[0].name : ""}` };
+      } else {
+        const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
+        if (!results.length) { await message.reply("Sonuç bulunamadı."); return; }
+        song = { url: results[0].url, title: results[0].title };
+      }
+    } catch {
+      await message.reply("Şarkı bilgisi alınamadı.");
+      return;
+    }
+    if (!musicQueues.has(message.guildId)) {
+      const connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: message.guildId,
+        adapterCreator: message.guild.voiceAdapterCreator,
+      });
+      const player = createAudioPlayer();
+      connection.subscribe(player);
+      player.on(AudioPlayerStatus.Idle, () => playNext(message.guildId));
+      musicQueues.set(message.guildId, { connection, player, queue: [], current: null, textChannel: message.channel });
+    }
+    const state = musicQueues.get(message.guildId);
+    state.queue.push(song);
+    if (!state.current) {
+      playNext(message.guildId);
+    } else {
+      await message.reply(`➕ Kuyruğa eklendi: **${song.title}**`);
+    }
+    return;
+  }
+
+  if (lower === "*dur") {
+    const state = musicQueues.get(message.guildId);
+    if (!state?.current) { await message.reply("Şu an çalan bir şey yok."); return; }
+    state.player.pause();
+    await message.reply("⏸️ Duraklatldı.");
+    return;
+  }
+
+  if (lower === "*devam") {
+    const state = musicQueues.get(message.guildId);
+    if (!state) { await message.reply("Şu an çalan bir şey yok."); return; }
+    state.player.unpause();
+    await message.reply("▶️ Devam ediyor.");
+    return;
+  }
+
+  if (lower === "*atla") {
+    const state = musicQueues.get(message.guildId);
+    if (!state?.current) { await message.reply("Atlanacak bir şey yok."); return; }
+    state.player.stop();
+    await message.reply("⏭️ Atlandı.");
+    return;
+  }
+
+  if (lower === "*kuyruk") {
+    const state = musicQueues.get(message.guildId);
+    if (!state?.current) { await message.reply("Kuyruk boş."); return; }
+    const lines = [`▶️ **${state.current.title}** (çalıyor)`];
+    state.queue.forEach((s, i) => lines.push(`${i + 1}. ${s.title}`));
+    await message.reply(lines.join("\n"));
+    return;
+  }
+
+  if (lower === "*çık" || lower === "*cik") {
+    const state = musicQueues.get(message.guildId);
+    if (!state) { await message.reply("Ses kanalında değilim."); return; }
+    state.queue = [];
+    state.player.stop();
+    try { state.connection.destroy(); } catch {}
+    musicQueues.delete(message.guildId);
+    await message.reply("👋 Ses kanalından çıkıldı.");
+    return;
   }
 
   if (lower === "*gökhan" || lower === "*gokhan") {
