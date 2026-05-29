@@ -831,7 +831,13 @@ async function ytdlpGetInfo(url) {
   return url;
 }
 
-function ytdlpSearch(query) {
+async function ytdlpSearch(query) {
+  // play-dl ile ara (cookie'li, hızlı)
+  try {
+    const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
+    if (results.length > 0) return { title: results[0].title, url: results[0].url };
+  } catch {}
+  // Fallback: yt-dlp
   return new Promise((resolve, reject) => {
     let stderr = "";
     const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s", "--no-warnings",
