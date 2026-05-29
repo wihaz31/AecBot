@@ -803,7 +803,9 @@ const musicQueues = new Map();
 
 const YT_COOKIE_FILE = "/tmp/yt-cookies.txt";
 if (process.env.YOUTUBE_COOKIE) {
-  try { fs.writeFileSync(YT_COOKIE_FILE, process.env.YOUTUBE_COOKIE); } catch {}
+  try {
+    fs.writeFileSync(YT_COOKIE_FILE, process.env.YOUTUBE_COOKIE.replace(/\\n/g, "\n"));
+  } catch {}
 }
 function ytdlpCookieArgs() {
   return process.env.YOUTUBE_COOKIE ? ["--cookies", YT_COOKIE_FILE] : [];
@@ -811,24 +813,37 @@ function ytdlpCookieArgs() {
 
 function ytdlpGetInfo(url) {
   return new Promise((resolve, reject) => {
-    execFile("yt-dlp", ["--no-playlist", "--print", "%(title)s", "--no-warnings", ...ytdlpCookieArgs(), url], { timeout: 15000 }, (err, stdout) => {
-      if (err) return reject(err);
+    let stderr = "";
+    const args = ["--no-playlist", "--print", "%(title)s", "--no-warnings", ...ytdlpCookieArgs(), url];
+    const proc = spawn("yt-dlp", args);
+    let stdout = "";
+    proc.stdout.on("data", d => { stdout += d; });
+    proc.stderr.on("data", d => { stderr += d; });
+    proc.on("close", code => {
+      if (code !== 0) return reject(new Error(stderr.slice(0, 200) || "yt-dlp hata kodu: " + code));
       resolve(stdout.trim());
     });
+    proc.on("error", reject);
+    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 15000);
   });
 }
 
 function ytdlpSearch(query) {
   return new Promise((resolve, reject) => {
-    execFile("yt-dlp", [
-      "--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s",
-      "--no-warnings", ...ytdlpCookieArgs(), `ytsearch1:${query}`
-    ], { timeout: 15000 }, (err, stdout) => {
-      if (err) return reject(err);
+    let stderr = "";
+    const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s", "--no-warnings", ...ytdlpCookieArgs(), `ytsearch1:${query}`];
+    const proc = spawn("yt-dlp", args);
+    let stdout = "";
+    proc.stdout.on("data", d => { stdout += d; });
+    proc.stderr.on("data", d => { stderr += d; });
+    proc.on("close", code => {
+      if (code !== 0) return reject(new Error(stderr.slice(0, 200) || "yt-dlp hata kodu: " + code));
       const lines = stdout.trim().split("\n");
       if (lines.length < 2) return reject(new Error("Sonuç bulunamadı"));
       resolve({ title: lines[0], url: lines[1] });
     });
+    proc.on("error", reject);
+    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 15000);
   });
 }
 
