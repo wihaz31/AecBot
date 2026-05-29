@@ -856,12 +856,17 @@ function ytdlpCreateResource(url) {
   const ytdlp = spawn("yt-dlp", ["-f", "bestaudio/best", "-o", "-", "--quiet", "--no-playlist",
     "--extractor-args", "youtube:player_client=android,web",
     ...ytdlpCookieArgs(), url]);
-  const ffmpeg = spawn("ffmpeg", ["-i", "pipe:0", "-vn", "-f", "ogg", "-acodec", "libopus", "-ar", "48000", "-ac", "2", "-loglevel", "error", "pipe:1"]);
+  const ffmpeg = spawn("ffmpeg", [
+    "-analyzeduration", "0", "-probesize", "32",
+    "-i", "pipe:0",
+    "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
+    "-loglevel", "error", "pipe:1"
+  ]);
   ytdlp.stdout.pipe(ffmpeg.stdin);
   ytdlp.stderr.on("data", () => {});
   ffmpeg.stderr.on("data", () => {});
   ytdlp.on("error", () => ffmpeg.kill());
-  return createAudioResource(ffmpeg.stdout, { inputType: StreamType.OggOpus });
+  return createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw });
 }
 
 async function playNext(guildId) {
