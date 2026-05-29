@@ -801,9 +801,17 @@ async function getRobloxPresence() {
 ========================= */
 const musicQueues = new Map();
 
+const YT_COOKIE_FILE = "/tmp/yt-cookies.txt";
+if (process.env.YOUTUBE_COOKIE) {
+  try { fs.writeFileSync(YT_COOKIE_FILE, process.env.YOUTUBE_COOKIE); } catch {}
+}
+function ytdlpCookieArgs() {
+  return process.env.YOUTUBE_COOKIE ? ["--cookies", YT_COOKIE_FILE] : [];
+}
+
 function ytdlpGetInfo(url) {
   return new Promise((resolve, reject) => {
-    execFile("yt-dlp", ["--no-playlist", "--print", "%(title)s", "--no-warnings", url], { timeout: 15000 }, (err, stdout) => {
+    execFile("yt-dlp", ["--no-playlist", "--print", "%(title)s", "--no-warnings", ...ytdlpCookieArgs(), url], { timeout: 15000 }, (err, stdout) => {
       if (err) return reject(err);
       resolve(stdout.trim());
     });
@@ -814,7 +822,7 @@ function ytdlpSearch(query) {
   return new Promise((resolve, reject) => {
     execFile("yt-dlp", [
       "--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s",
-      "--no-warnings", `ytsearch1:${query}`
+      "--no-warnings", ...ytdlpCookieArgs(), `ytsearch1:${query}`
     ], { timeout: 15000 }, (err, stdout) => {
       if (err) return reject(err);
       const lines = stdout.trim().split("\n");
@@ -825,7 +833,7 @@ function ytdlpSearch(query) {
 }
 
 function ytdlpCreateResource(url) {
-  const ytdlp = spawn("yt-dlp", ["-f", "bestaudio[ext=webm]/bestaudio/best", "-o", "-", "--quiet", "--no-playlist", url]);
+  const ytdlp = spawn("yt-dlp", ["-f", "bestaudio[ext=webm]/bestaudio/best", "-o", "-", "--quiet", "--no-playlist", ...ytdlpCookieArgs(), url]);
   const ffmpeg = spawn("ffmpeg", ["-i", "pipe:0", "-vn", "-f", "ogg", "-acodec", "libopus", "-ar", "48000", "-ac", "2", "-loglevel", "error", "pipe:1"]);
   ytdlp.stdout.pipe(ffmpeg.stdin);
   ytdlp.stderr.on("data", () => {});
