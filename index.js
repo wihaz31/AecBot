@@ -1148,7 +1148,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  if (lower === "*yardim" || lower === "*help") {
+  if (lower === "*yardim" || lower === "*yardım" || lower === "*help") {
     await message.reply([
       "**komutlar:**",
       "`*ai [mesaj]` — yapay zeka",
@@ -1173,7 +1173,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  if (lower.startsWith("çal ", 1) || lower.startsWith("cal ", 1)) {
+  if (lower.startsWith("*çal ") || lower.startsWith("*cal ")) {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) { await message.reply("Bir ses kanalında olman gerekiyor!"); return; }
     const query = content.slice(content.indexOf(" ") + 1).trim();
