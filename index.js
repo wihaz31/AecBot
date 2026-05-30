@@ -1094,11 +1094,42 @@ function ffmpegFromUrl(audioUrl) {
   });
 }
 
-async function ytdlpCreateResource(url) {
+function soundcloudPipe(query) {
+  return new Promise((resolve, reject) => {
+    const ytdlp = spawn("yt-dlp", [
+      "-f", "bestaudio",
+      "--no-playlist",
+      "-o", "-",
+      `scsearch1:${query}`
+    ]);
+    const ffmpeg = spawn("ffmpeg", [
+      "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
+      "-loglevel", "warning", "pipe:1"
+    ]);
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    let ytErr = "", resolved = false;
+    ytdlp.stderr.on("data", d => { ytErr += d; });
+    ytdlp.on("close", code => {
+      if (code !== 0 && !resolved) { resolved = true; reject(new Error(ytErr.slice(0, 200))); }
+    });
+    ffmpeg.stderr.on("data", d => console.log("[ffmpeg-sc]", d.toString().slice(0, 150)));
+    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ytdlp.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ffmpeg.stdout.once("readable", () => {
+      if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
+    });
+    const timer = setTimeout(() => {
+      if (!resolved) { resolved = true; ytdlp.kill(); ffmpeg.kill(); reject(new Error("SoundCloud 30s timeout")); }
+    }, 30000);
+    ffmpeg.stdout.on("close", () => clearTimeout(timer));
+  });
+}
+
+async function ytdlpCreateResource(url, title) {
   const ytVidMatch = url.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
   if (ytVidMatch) {
     const videoId = ytVidMatch[1];
-    // 1. Invidious proxy (datacenter IP CDN kısıtlamasını aşar)
+    // 1. Invidious proxy
     try {
       const audioUrl = await getInvidiousAudioUrl(videoId);
       if (audioUrl) return await ffmpegFromUrl(audioUrl);
@@ -1113,17 +1144,20 @@ async function ytdlpCreateResource(url) {
       console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
     }
   }
-  // 3. Fallback: yt-dlp pipe
+  // 3. yt-dlp pipe
   const cookieArgs = ytdlpCookieArgs();
   try {
     return await ytdlpPipe(url, cookieArgs);
   } catch (e) {
     if (cookieArgs.length > 0) {
       console.log("[MÜZİK] Cookie'li deneme başarısız, retry:", e.message?.slice(0, 80));
-      return await ytdlpPipe(url, []);
+      try { return await ytdlpPipe(url, []); } catch {}
     }
-    throw e;
   }
+  // 4. SoundCloud fallback — datacenter IP CDN kısıtlamasını aşar
+  const scQuery = title || url;
+  console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
+  return await soundcloudPipe(scQuery);
 }
 
 async function playNext(guildId) {
@@ -1138,7 +1172,7 @@ async function playNext(guildId) {
   const song = state.queue.shift();
   state.current = song;
   try {
-    const resource = await ytdlpCreateResource(song.url);
+    const resource = await ytdlpCreateResource(song.url, song.title);
     state.player.play(resource);
     if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
   } catch (e) {
