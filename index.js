@@ -986,13 +986,82 @@ function ytdlpPipe(url, cookieArgs) {
   });
 }
 
+const INVIDIOUS_INSTANCES = [
+  "https://invidious.io.lol",
+  "https://inv.tux.pizza",
+  "https://yewtu.be",
+  "https://iv.datura.network",
+];
+
+async function getInvidiousAudioUrl(videoId) {
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const r = await fetchWithTimeout(
+        `${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats&local=true`,
+        {}, 8000
+      );
+      if (!r.ok) continue;
+      const data = await r.json();
+      if (data.error) continue;
+      const formats = (data.adaptiveFormats || [])
+        .filter(f => f.type?.startsWith("audio/"))
+        .sort((a, b) => {
+          const aOpus = a.type?.includes("opus") ? 1 : 0;
+          const bOpus = b.type?.includes("opus") ? 1 : 0;
+          return bOpus - aOpus || (b.bitrate || 0) - (a.bitrate || 0);
+        });
+      if (!formats.length) continue;
+      const audioUrl = formats[0].url;
+      if (!audioUrl) continue;
+      const full = audioUrl.startsWith("http") ? audioUrl : `${instance}${audioUrl}`;
+      console.log(`[MÜZİK] Invidious stream: ${instance}`);
+      return full;
+    } catch (e) {
+      console.log(`[MÜZİK] Invidious ${instance} başarısız:`, e.message?.slice(0, 60));
+    }
+  }
+  return null;
+}
+
+function ffmpegFromUrl(audioUrl) {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn("ffmpeg", [
+      "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+      "-i", audioUrl,
+      "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
+      "-loglevel", "warning", "pipe:1"
+    ]);
+    let resolved = false;
+    ffmpeg.stderr.on("data", d => console.log("[ffmpeg-inv]", d.toString().slice(0, 150)));
+    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ffmpeg.stdout.once("readable", () => {
+      if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
+    });
+    const timer = setTimeout(() => {
+      if (!resolved) { resolved = true; ffmpeg.kill(); reject(new Error("Invidious ffmpeg 30s timeout")); }
+    }, 30000);
+    ffmpeg.stdout.on("close", () => clearTimeout(timer));
+  });
+}
+
 async function ytdlpCreateResource(url) {
+  // Önce Invidious proxy dene (datacenter IP CDN kısıtlamasını aşar)
+  const ytVidMatch = url.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
+  if (ytVidMatch) {
+    try {
+      const audioUrl = await getInvidiousAudioUrl(ytVidMatch[1]);
+      if (audioUrl) return await ffmpegFromUrl(audioUrl);
+    } catch (e) {
+      console.log("[MÜZİK] Invidious stream başarısız:", e.message?.slice(0, 80));
+    }
+  }
+  // Fallback: yt-dlp pipe
   const cookieArgs = ytdlpCookieArgs();
   try {
     return await ytdlpPipe(url, cookieArgs);
   } catch (e) {
     if (cookieArgs.length > 0) {
-      console.log("[MÜZİK] Cookie'li deneme başarısız, cookie'siz retry:", e.message?.slice(0, 80));
+      console.log("[MÜZİK] Cookie'li deneme başarısız, retry:", e.message?.slice(0, 80));
       return await ytdlpPipe(url, []);
     }
     throw e;
