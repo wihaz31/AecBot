@@ -959,7 +959,9 @@ const client = new Client({
 });
 
 const player = new Player(client);
-player.extractors.register(YoutubeiExtractor, {});
+player.extractors.register(YoutubeiExtractor, {
+  streamOptions: { useClient: 'IOS' },
+});
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor');
 
 /* =========================
@@ -1135,7 +1137,12 @@ client.on('interactionCreate', async (interaction) => {
   if (cmd === 'çal') {
     const voiceChannel = interaction.member?.voice?.channel;
     if (!voiceChannel) { await interaction.reply({ content: 'Önce bir ses kanalına gir!', flags: 64 }); return; }
-    const query = interaction.options.getString('şarkı');
+    let query = interaction.options.getString('şarkı');
+    // youtu.be/ID?list=... veya watch?v=ID&list=... → temiz video URL'ye çevir
+    const ytVidMatch = query.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
+    if (ytVidMatch && query.includes('list=')) {
+      query = `https://www.youtube.com/watch?v=${ytVidMatch[1]}`;
+    }
     await interaction.deferReply();
     try {
       const { track } = await player.play(voiceChannel, query, {
