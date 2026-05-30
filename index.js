@@ -987,10 +987,18 @@ function ytdlpPipe(url, cookieArgs) {
 }
 
 const INVIDIOUS_INSTANCES = [
-  "https://invidious.io.lol",
-  "https://inv.tux.pizza",
+  "https://invidious.privacyredirect.com",
+  "https://invidious.nerdvpn.de",
   "https://yewtu.be",
+  "https://invidious.slipfox.xyz",
+  "https://inv.tux.pizza",
   "https://iv.datura.network",
+];
+
+const PIPED_INSTANCES = [
+  "https://pipedapi.kavin.rocks",
+  "https://pipedapi.adminforge.de",
+  "https://pipedapi.tokhmi.xyz",
 ];
 
 async function getInvidiousAudioUrl(videoId) {
@@ -1023,6 +1031,27 @@ async function getInvidiousAudioUrl(videoId) {
   return null;
 }
 
+async function getPipedAudioUrl(videoId) {
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const r = await fetchWithTimeout(`${instance}/streams/${videoId}`, {}, 8000);
+      if (!r.ok) continue;
+      const data = await r.json();
+      if (data.error) continue;
+      const streams = (data.audioStreams || [])
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      if (!streams.length) continue;
+      const audioUrl = streams[0].url;
+      if (!audioUrl) continue;
+      console.log(`[MÜZİK] Piped stream: ${instance}`);
+      return audioUrl;
+    } catch (e) {
+      console.log(`[MÜZİK] Piped ${instance} başarısız:`, e.message?.slice(0, 60));
+    }
+  }
+  return null;
+}
+
 function ffmpegFromUrl(audioUrl) {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
@@ -1045,17 +1074,25 @@ function ffmpegFromUrl(audioUrl) {
 }
 
 async function ytdlpCreateResource(url) {
-  // Önce Invidious proxy dene (datacenter IP CDN kısıtlamasını aşar)
   const ytVidMatch = url.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
   if (ytVidMatch) {
+    const videoId = ytVidMatch[1];
+    // 1. Invidious proxy (datacenter IP CDN kısıtlamasını aşar)
     try {
-      const audioUrl = await getInvidiousAudioUrl(ytVidMatch[1]);
+      const audioUrl = await getInvidiousAudioUrl(videoId);
       if (audioUrl) return await ffmpegFromUrl(audioUrl);
     } catch (e) {
       console.log("[MÜZİK] Invidious stream başarısız:", e.message?.slice(0, 80));
     }
+    // 2. Piped.video proxy
+    try {
+      const audioUrl = await getPipedAudioUrl(videoId);
+      if (audioUrl) return await ffmpegFromUrl(audioUrl);
+    } catch (e) {
+      console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
+    }
   }
-  // Fallback: yt-dlp pipe
+  // 3. Fallback: yt-dlp pipe
   const cookieArgs = ytdlpCookieArgs();
   try {
     return await ytdlpPipe(url, cookieArgs);
