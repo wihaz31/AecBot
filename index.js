@@ -841,7 +841,7 @@ async function ytdlpSearch(query) {
   return new Promise((resolve, reject) => {
     let stderr = "";
     const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s", "--no-warnings",
-      "--extractor-args", "youtube:player_client=android,web",
+      "--extractor-args", "youtube:player_client=ios,web",
       "--socket-timeout", "10", ...ytdlpCookieArgs(), `ytsearch1:${query}`];
     const proc = spawn("yt-dlp", args);
     let stdout = "";
@@ -859,14 +859,6 @@ async function ytdlpSearch(query) {
 }
 
 async function ytdlpCreateResource(url) {
-  // 1. play-dl ile stream dene (cookie'li, en hızlı)
-  try {
-    const stream = await playdl.stream(url, { quality: 2 });
-    return createAudioResource(stream.stream, { inputType: stream.type });
-  } catch (e) {
-    console.log("[MÜZİK] play-dl stream başarısız, yt-dlp pipe deneniyor:", e.message?.slice(0, 100));
-  }
-  // 2. yt-dlp stdout pipe → ffmpeg (webm/opus tercih et, seek gerektirmez)
   return new Promise((resolve, reject) => {
     const ytdlp = spawn("yt-dlp", [
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
@@ -876,16 +868,41 @@ async function ytdlpCreateResource(url) {
     const ffmpeg = spawn("ffmpeg", [
       "-i", "pipe:0",
       "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
-      "-loglevel", "error", "pipe:1"
+      "-loglevel", "warning", "pipe:1"
     ]);
     ytdlp.stdout.pipe(ffmpeg.stdin);
+
     let ytErr = "";
+    let resolved = false;
+
     ytdlp.stderr.on("data", d => { ytErr += d; });
-    ytdlp.on("close", code => { if (code !== 0) console.log("[yt-dlp pipe]", ytErr.slice(0, 200)); });
-    ffmpeg.stderr.on("data", d => console.log("[ffmpeg]", d.toString().slice(0, 100)));
-    ytdlp.on("error", reject);
-    ffmpeg.on("error", reject);
-    resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
+    ytdlp.on("close", code => {
+      if (code !== 0) {
+        console.log("[yt-dlp]", ytErr.slice(0, 500));
+        if (!resolved) { resolved = true; reject(new Error("yt-dlp hata: " + ytErr.slice(0, 200))); }
+      }
+    });
+    ffmpeg.stderr.on("data", d => console.log("[ffmpeg]", d.toString().slice(0, 200)));
+    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ytdlp.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+
+    // Gerçek veri gelene kadar resolve etme
+    ffmpeg.stdout.once("readable", () => {
+      if (!resolved) {
+        resolved = true;
+        resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
+      }
+    });
+
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        ytdlp.kill();
+        ffmpeg.kill();
+        reject(new Error("yt-dlp/ffmpeg 30s timeout"));
+      }
+    }, 30000);
+    ffmpeg.stdout.on("close", () => clearTimeout(timer));
   });
 }
 
