@@ -1003,7 +1003,7 @@ const PIPED_INSTANCES = [
 
 async function isAudioUrlValid(url) {
   try {
-    const r = await fetchWithTimeout(url, { method: "HEAD" }, 2500);
+    const r = await fetchWithTimeout(url, { method: "HEAD" }, 1500);
     if (!r.ok) return false;
     const ct = r.headers.get("content-type") || "";
     return ct.includes("audio") || ct.includes("video") || ct.includes("octet");
@@ -1037,7 +1037,7 @@ async function getInvidiousAudioUrl(videoId) {
 
 async function getPipedAudioUrl(videoId) {
   const attempts = PIPED_INSTANCES.map(async instance => {
-    const r = await fetchWithTimeout(`${instance}/streams/${videoId}`, {}, 4000);
+    const r = await fetchWithTimeout(`${instance}/streams/${videoId}`, {}, 2500);
     if (!r.ok) throw new Error("not ok");
     const data = await r.json();
     if (data.error) throw new Error(data.error);
@@ -1095,13 +1095,23 @@ function ffmpegFromUrl(audioUrl) {
   });
 }
 
-function soundcloudPipe(query) {
+async function soundcloudSearch(query) {
+  try {
+    const results = await playdl.search(query, { source: { soundcloud: "tracks" }, limit: 1 });
+    if (results && results[0]) return results[0].url;
+  } catch {}
+  return null;
+}
+
+function soundcloudPipe(urlOrQuery) {
+  // Doğrudan URL verilmişse yt-dlp'ye geç, yoksa scsearch1 kullan
+  const arg = urlOrQuery.startsWith("http") ? urlOrQuery : `scsearch1:${urlOrQuery}`;
   return new Promise((resolve, reject) => {
     const ytdlp = spawn("yt-dlp", [
       "-f", "bestaudio",
       "--no-playlist",
       "-o", "-",
-      `scsearch1:${query}`
+      arg
     ]);
     const ffmpeg = spawn("ffmpeg", [
       "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
@@ -1149,7 +1159,9 @@ async function ytdlpCreateResource(url, title) {
   const scQuery = title || url;
   console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
   try {
-    return await soundcloudPipe(scQuery);
+    // play-dl ile hızlı arama, sonra doğrudan URL'yi stream et
+    const scUrl = await soundcloudSearch(scQuery);
+    return await soundcloudPipe(scUrl || scQuery);
   } catch (e) {
     console.log("[MÜZİK] SoundCloud başarısız:", e.message?.slice(0, 80));
   }
@@ -1171,10 +1183,18 @@ async function playNext(guildId) {
   if (!state) return;
   if (state.queue.length === 0) {
     state.current = null;
-    try { state.connection.destroy(); } catch {}
-    musicQueues.delete(guildId);
+    // Hemen çıkma — 3 dakika bekle, yeni şarkı gelmezse ayrıl
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(() => {
+      const s = musicQueues.get(guildId);
+      if (s && s.queue.length === 0 && !s.current) {
+        try { s.connection.destroy(); } catch {}
+        musicQueues.delete(guildId);
+      }
+    }, 3 * 60 * 1000);
     return;
   }
+  if (state.idleTimer) { clearTimeout(state.idleTimer); state.idleTimer = null; }
   const song = state.queue.shift();
   state.current = song;
   try {
