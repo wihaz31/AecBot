@@ -1001,10 +1001,9 @@ const PIPED_INSTANCES = [
   "https://pipedapi.tokhmi.xyz",
 ];
 
-// URL'nin gerçekten audio stream sunup sunmadığını HEAD isteğiyle kontrol et
 async function isAudioUrlValid(url) {
   try {
-    const r = await fetchWithTimeout(url, { method: "HEAD" }, 5000);
+    const r = await fetchWithTimeout(url, { method: "HEAD" }, 2500);
     if (!r.ok) return false;
     const ct = r.headers.get("content-type") || "";
     return ct.includes("audio") || ct.includes("video") || ct.includes("octet");
@@ -1013,48 +1012,50 @@ async function isAudioUrlValid(url) {
   }
 }
 
-// Invidious /latest_version endpoint'i: adaptiveFormats'tan daha güvenilir proxy
+// Tüm instance + itag kombinasyonlarını paralel dene, ilk çalışanı al
 async function getInvidiousAudioUrl(videoId) {
-  const itags = [251, 250, 249, 140]; // opus 160k, opus 70k, opus 50k, m4a 128k
+  const itags = [251, 140];
+  const attempts = [];
   for (const instance of INVIDIOUS_INSTANCES) {
     for (const itag of itags) {
-      try {
+      attempts.push((async () => {
         const url = `${instance}/latest_version?id=${videoId}&itag=${itag}&local=true`;
         const valid = await isAudioUrlValid(url);
-        if (!valid) continue;
+        if (!valid) throw new Error("invalid");
         console.log(`[MÜZİK] Invidious stream: ${instance} itag=${itag}`);
         return url;
-      } catch (e) {
-        // Sonraki itag'i dene
-      }
+      })());
     }
-    console.log(`[MÜZİK] Invidious ${instance} başarısız`);
   }
-  return null;
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    console.log("[MÜZİK] Tüm Invidious instance'ları başarısız");
+    return null;
+  }
 }
 
 async function getPipedAudioUrl(videoId) {
-  for (const instance of PIPED_INSTANCES) {
-    try {
-      const r = await fetchWithTimeout(`${instance}/streams/${videoId}`, {}, 8000);
-      if (!r.ok) continue;
-      const data = await r.json();
-      if (data.error) continue;
-      const streams = (data.audioStreams || [])
-        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      if (!streams.length) continue;
-      const audioUrl = streams[0].url;
-      if (!audioUrl) continue;
-      // URL'nin gerçekten erişilebilir olduğunu doğrula
-      const valid = await isAudioUrlValid(audioUrl);
-      if (!valid) { console.log(`[MÜZİK] Piped ${instance} URL erişilemez`); continue; }
-      console.log(`[MÜZİK] Piped stream: ${instance}`);
-      return audioUrl;
-    } catch (e) {
-      console.log(`[MÜZİK] Piped ${instance} başarısız:`, e.message?.slice(0, 60));
-    }
+  const attempts = PIPED_INSTANCES.map(async instance => {
+    const r = await fetchWithTimeout(`${instance}/streams/${videoId}`, {}, 4000);
+    if (!r.ok) throw new Error("not ok");
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const streams = (data.audioStreams || []).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    if (!streams.length) throw new Error("no streams");
+    const audioUrl = streams[0].url;
+    if (!audioUrl) throw new Error("no url");
+    const valid = await isAudioUrlValid(audioUrl);
+    if (!valid) throw new Error("url erişilemez");
+    console.log(`[MÜZİK] Piped stream: ${instance}`);
+    return audioUrl;
+  });
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    console.log("[MÜZİK] Tüm Piped instance'ları başarısız");
+    return null;
   }
-  return null;
 }
 
 function ffmpegFromUrl(audioUrl) {
