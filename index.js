@@ -1263,10 +1263,13 @@ client.on("messageCreate", async (message) => {
     if (!query) { await message.reply("Kullanım: `*çal [şarkı adı / YouTube URL / Spotify URL]`"); return; }
     let song;
     try {
+      // youtu.be/ID?list=... veya watch?v=ID&list=... gibi URL'lerde video ID'yi çıkar
+      const ytVidMatch = query.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
       const urlType = await playdl.validate(query);
-      if (urlType === "yt_video") {
-        const title = await ytdlpGetInfo(query);
-        song = { url: query, title: title || query };
+      if (urlType === "yt_video" || (ytVidMatch && (urlType === "yt_playlist" || !urlType))) {
+        const videoUrl = ytVidMatch ? `https://www.youtube.com/watch?v=${ytVidMatch[1]}` : query;
+        const title = await ytdlpGetInfo(videoUrl);
+        song = { url: videoUrl, title: title || videoUrl };
       } else if (urlType === "sp_track") {
         const spData = await playdl.spotify(query);
         const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ""}`.trim();
