@@ -6,8 +6,10 @@ dns.setDefaultResultOrder("ipv4first");
 const http = require("http");
 const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { Player } = require("discord-player");
-const { YoutubeiExtractor } = require("discord-player-youtubei");
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
+const playdl = require("play-dl");
+const { spawn } = require("child_process");
+const fs = require("fs");
 
 /* =========================
    AYARLAR
@@ -898,6 +900,128 @@ async function askGemini(prompt, useFile = false, recentHistory = "") {
 }
 
 /* =========================
+   MÜZİK (yt-dlp)
+========================= */
+const musicQueues = new Map();
+
+const YT_COOKIE_FILE = "/tmp/yt-cookies.txt";
+if (process.env.YOUTUBE_COOKIE) {
+  try {
+    let content = process.env.YOUTUBE_COOKIE.replace(/\\n/g, "\n");
+    if (!content.includes("\n")) {
+      const entries = content.split(/ (?=\.youtube\.com\t)/);
+      content = "# Netscape HTTP Cookie File\n" + entries.join("\n");
+    }
+    fs.writeFileSync(YT_COOKIE_FILE, content);
+  } catch {}
+}
+function ytdlpCookieArgs() {
+  return process.env.YOUTUBE_COOKIE ? ["--cookies", YT_COOKIE_FILE] : [];
+}
+
+async function ytdlpGetInfo(url) {
+  try {
+    const r = await fetchWithTimeout(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, {}, 5000
+    );
+    if (r.ok) { const d = await r.json(); return d.title || url; }
+  } catch {}
+  return url;
+}
+
+async function ytdlpSearch(query) {
+  try {
+    const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
+    if (results.length > 0) return { title: results[0].title, url: results[0].url };
+  } catch {}
+  return new Promise((resolve, reject) => {
+    const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s",
+      "--no-warnings", "--extractor-args", "youtube:player_client=ios,web",
+      "--socket-timeout", "10", ...ytdlpCookieArgs(), `ytsearch1:${query}`];
+    const proc = spawn("yt-dlp", args);
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", d => { stdout += d; });
+    proc.stderr.on("data", d => { stderr += d; });
+    proc.on("close", code => {
+      if (code !== 0) return reject(new Error(stderr.slice(0, 200) || "yt-dlp hata: " + code));
+      const lines = stdout.trim().split("\n");
+      if (lines.length < 2) return reject(new Error("Sonuç bulunamadı"));
+      resolve({ title: lines[0], url: lines[1] });
+    });
+    proc.on("error", reject);
+    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 20000);
+  });
+}
+
+function ytdlpPipe(url, cookieArgs) {
+  return new Promise((resolve, reject) => {
+    const ytdlp = spawn("yt-dlp", [
+      "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
+      "--no-playlist", "--extractor-args", "youtube:player_client=ios,web",
+      ...cookieArgs, "-o", "-", url
+    ]);
+    const ffmpeg = spawn("ffmpeg", [
+      "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
+      "-loglevel", "warning", "pipe:1"
+    ]);
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    let ytErr = "", resolved = false;
+    ytdlp.stderr.on("data", d => { ytErr += d; });
+    ytdlp.on("close", code => {
+      if (code !== 0) {
+        console.log("[yt-dlp]", ytErr.slice(0, 300));
+        if (!resolved) { resolved = true; reject(new Error(ytErr.slice(0, 200))); }
+      }
+    });
+    ffmpeg.stderr.on("data", d => console.log("[ffmpeg]", d.toString().slice(0, 150)));
+    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ytdlp.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ffmpeg.stdout.once("readable", () => {
+      if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
+    });
+    const timer = setTimeout(() => {
+      if (!resolved) { resolved = true; ytdlp.kill(); ffmpeg.kill(); reject(new Error("30s timeout")); }
+    }, 30000);
+    ffmpeg.stdout.on("close", () => clearTimeout(timer));
+  });
+}
+
+async function ytdlpCreateResource(url) {
+  const cookieArgs = ytdlpCookieArgs();
+  try {
+    return await ytdlpPipe(url, cookieArgs);
+  } catch (e) {
+    if (cookieArgs.length > 0) {
+      console.log("[MÜZİK] Cookie'li deneme başarısız, cookie'siz retry:", e.message?.slice(0, 80));
+      return await ytdlpPipe(url, []);
+    }
+    throw e;
+  }
+}
+
+async function playNext(guildId) {
+  const state = musicQueues.get(guildId);
+  if (!state) return;
+  if (state.queue.length === 0) {
+    state.current = null;
+    try { state.connection.destroy(); } catch {}
+    musicQueues.delete(guildId);
+    return;
+  }
+  const song = state.queue.shift();
+  state.current = song;
+  try {
+    const resource = await ytdlpCreateResource(song.url);
+    state.player.play(resource);
+    if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
+  } catch (e) {
+    console.error("[MÜZİK] playNext hatası:", e.message?.slice(0, 200));
+    if (state.textChannel) await state.textChannel.send("❌ Çalarken hata oluştu, atlanıyor...");
+    playNext(guildId);
+  }
+}
+
+/* =========================
    SLASH KOMUT TANIMLARI
 ========================= */
 const SLASH_COMMANDS = [
@@ -958,28 +1082,6 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
-const player = new Player(client);
-player.extractors.register(YoutubeiExtractor, {
-  streamOptions: { useClient: 'IOS' },
-});
-player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor');
-
-/* =========================
-   PLAYER EVENTS
-========================= */
-player.events.on('playerStart', (queue, track) => {
-  queue.metadata?.channel?.send(`▶️ Şimdi çalıyor: **${track.title}**`).catch(() => {});
-});
-player.events.on('audioTrackAdd', (queue, track) => {
-  // kuyruğa eklendi mesajı interactionCreate'te gönderiliyor, burada gönderme
-});
-player.events.on('playerError', (queue, error) => {
-  console.error('[PLAYER] Hata:', error.message);
-  queue.metadata?.channel?.send('❌ Çalarken hata oluştu, atlanıyor...').catch(() => {});
-});
-player.events.on('error', (queue, error) => {
-  console.error('[PLAYER] Queue hatası:', error.message);
-});
 
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
@@ -1138,65 +1240,90 @@ client.on('interactionCreate', async (interaction) => {
     const voiceChannel = interaction.member?.voice?.channel;
     if (!voiceChannel) { await interaction.reply({ content: 'Önce bir ses kanalına gir!', flags: 64 }); return; }
     let query = interaction.options.getString('şarkı');
-    // youtu.be/ID?list=... veya watch?v=ID&list=... → temiz video URL'ye çevir
     const ytVidMatch = query.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
-    if (ytVidMatch && query.includes('list=')) {
-      query = `https://www.youtube.com/watch?v=${ytVidMatch[1]}`;
-    }
+    if (ytVidMatch && query.includes('list=')) query = `https://www.youtube.com/watch?v=${ytVidMatch[1]}`;
     await interaction.deferReply();
+    let song;
     try {
-      const { track } = await player.play(voiceChannel, query, {
-        nodeOptions: {
-          metadata: { channel: interaction.channel },
-          leaveOnEmpty: true, leaveOnEmptyCooldown: 30000,
-          leaveOnEnd: true, leaveOnEndCooldown: 30000,
-          volume: 75,
-        },
-      });
-      await interaction.editReply(`➕ Kuyruğa eklendi: **${track.title}**`);
+      const urlType = await playdl.validate(query).catch(() => null);
+      if (urlType === 'yt_video' || (ytVidMatch && (urlType === 'yt_playlist' || !urlType))) {
+        const videoUrl = ytVidMatch ? `https://www.youtube.com/watch?v=${ytVidMatch[1]}` : query;
+        const title = await ytdlpGetInfo(videoUrl);
+        song = { url: videoUrl, title: title || videoUrl };
+      } else if (urlType === 'sp_track') {
+        const spData = await playdl.spotify(query);
+        const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ''}`.trim();
+        const result = await ytdlpSearch(searchQ);
+        song = { url: result.url, title: `${spData.name}${spData.artists?.[0]?.name ? ' - ' + spData.artists[0].name : ''}` };
+      } else {
+        song = await ytdlpSearch(query);
+      }
     } catch (e) {
-      await interaction.editReply(`❌ Hata: ${e.message?.slice(0, 100)}`);
+      await interaction.editReply(`❌ Şarkı bulunamadı: ${e.message?.slice(0, 100)}`);
+      return;
+    }
+    if (!musicQueues.has(interaction.guildId)) {
+      const connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: interaction.guildId,
+        adapterCreator: interaction.guild.voiceAdapterCreator,
+      });
+      const ap = createAudioPlayer();
+      connection.subscribe(ap);
+      ap.on(AudioPlayerStatus.Idle, () => playNext(interaction.guildId));
+      musicQueues.set(interaction.guildId, { connection, player: ap, queue: [], current: null, textChannel: interaction.channel });
+    }
+    const state = musicQueues.get(interaction.guildId);
+    state.queue.push(song);
+    if (!state.current) {
+      await interaction.editReply(`▶️ Yükleniyor: **${song.title}**`);
+      playNext(interaction.guildId);
+    } else {
+      await interaction.editReply(`➕ Kuyruğa eklendi: **${song.title}**`);
     }
     return;
   }
 
   if (cmd === 'dur') {
-    const queue = player.nodes.get(interaction.guildId);
-    if (!queue?.currentTrack) { await interaction.reply('Şu an çalan bir şey yok.'); return; }
-    queue.node.pause();
+    const state = musicQueues.get(interaction.guildId);
+    if (!state?.current) { await interaction.reply('Şu an çalan bir şey yok.'); return; }
+    state.player.pause();
     await interaction.reply('⏸️ Duraklatıldı.');
     return;
   }
 
   if (cmd === 'devam') {
-    const queue = player.nodes.get(interaction.guildId);
-    if (!queue) { await interaction.reply('Şu an çalan bir şey yok.'); return; }
-    queue.node.resume();
+    const state = musicQueues.get(interaction.guildId);
+    if (!state) { await interaction.reply('Şu an çalan bir şey yok.'); return; }
+    state.player.unpause();
     await interaction.reply('▶️ Devam ediyor.');
     return;
   }
 
   if (cmd === 'atla') {
-    const queue = player.nodes.get(interaction.guildId);
-    if (!queue?.currentTrack) { await interaction.reply('Atlanacak bir şey yok.'); return; }
-    queue.node.skip();
+    const state = musicQueues.get(interaction.guildId);
+    if (!state?.current) { await interaction.reply('Atlanacak bir şey yok.'); return; }
+    state.player.stop();
     await interaction.reply('⏭️ Atlandı.');
     return;
   }
 
   if (cmd === 'kuyruk') {
-    const queue = player.nodes.get(interaction.guildId);
-    if (!queue?.currentTrack) { await interaction.reply('Kuyruk boş.'); return; }
-    const lines = [`▶️ **${queue.currentTrack.title}** (çalıyor)`];
-    queue.tracks.data.forEach((t, i) => lines.push(`${i + 1}. ${t.title}`));
+    const state = musicQueues.get(interaction.guildId);
+    if (!state?.current) { await interaction.reply('Kuyruk boş.'); return; }
+    const lines = [`▶️ **${state.current.title}** (çalıyor)`];
+    state.queue.forEach((s, i) => lines.push(`${i + 1}. ${s.title}`));
     await interaction.reply(lines.slice(0, 20).join('\n'));
     return;
   }
 
   if (cmd === 'çık') {
-    const queue = player.nodes.get(interaction.guildId);
-    if (!queue) { await interaction.reply('Ses kanalında değilim.'); return; }
-    queue.delete();
+    const state = musicQueues.get(interaction.guildId);
+    if (!state) { await interaction.reply('Ses kanalında değilim.'); return; }
+    state.queue = [];
+    state.player.stop();
+    try { state.connection.destroy(); } catch {}
+    musicQueues.delete(interaction.guildId);
     await interaction.reply('👋 Ses kanalından çıkıldı.');
     return;
   }
