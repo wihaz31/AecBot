@@ -1241,6 +1241,15 @@ client.once("ready", async () => {
   await client.application.commands.set(SLASH_COMMANDS);
   console.log('[BOT] Slash komutları kaydedildi');
 
+  // SoundCloud client_id otomatik al
+  try {
+    const scId = await playdl.getFreeClientID();
+    playdl.setToken({ soundcloud: { client_id: scId } });
+    console.log('[BOT] SoundCloud client_id alındı');
+  } catch (e) {
+    console.log('[BOT] SoundCloud client_id alınamadı:', e.message?.slice(0, 60));
+  }
+
   const [savedEconomy, savedInventory] = await Promise.all([
     redisGet("economy"),
     redisGet("inventory"),
