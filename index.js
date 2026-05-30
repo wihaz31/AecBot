@@ -1095,45 +1095,14 @@ function ffmpegFromUrl(audioUrl) {
   });
 }
 
-async function soundcloudSearch(query) {
-  try {
-    const results = await playdl.search(query, { source: { soundcloud: "tracks" }, limit: 1 });
-    if (results && results[0]) return results[0].url;
-  } catch {}
-  return null;
-}
-
-function soundcloudPipe(urlOrQuery) {
-  // Doğrudan URL verilmişse yt-dlp'ye geç, yoksa scsearch1 kullan
-  const arg = urlOrQuery.startsWith("http") ? urlOrQuery : `scsearch1:${urlOrQuery}`;
-  return new Promise((resolve, reject) => {
-    const ytdlp = spawn("yt-dlp", [
-      "-f", "bestaudio",
-      "--no-playlist",
-      "-o", "-",
-      arg
-    ]);
-    const ffmpeg = spawn("ffmpeg", [
-      "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
-      "-loglevel", "warning", "pipe:1"
-    ]);
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-    let ytErr = "", resolved = false;
-    ytdlp.stderr.on("data", d => { ytErr += d; });
-    ytdlp.on("close", code => {
-      if (code !== 0 && !resolved) { resolved = true; reject(new Error(ytErr.slice(0, 200))); }
-    });
-    ffmpeg.stderr.on("data", d => console.log("[ffmpeg-sc]", d.toString().slice(0, 150)));
-    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
-    ytdlp.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
-    ffmpeg.stdout.once("readable", () => {
-      if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
-    });
-    const timer = setTimeout(() => {
-      if (!resolved) { resolved = true; ytdlp.kill(); ffmpeg.kill(); reject(new Error("SoundCloud 30s timeout")); }
-    }, 30000);
-    ffmpeg.stdout.on("close", () => clearTimeout(timer));
-  });
+async function soundcloudStream(query) {
+  // play-dl ile SoundCloud'da ara ve direkt stream et (yt-dlp gerektirmez)
+  const results = await playdl.search(query, { source: { soundcloud: "tracks" }, limit: 1 });
+  if (!results || !results[0]) throw new Error("SoundCloud'da bulunamadı");
+  const scUrl = results[0].url;
+  console.log("[MÜZİK] SoundCloud:", results[0].name);
+  const stream = await playdl.stream(scUrl);
+  return createAudioResource(stream.stream, { inputType: stream.type });
 }
 
 async function ytdlpCreateResource(url, title) {
@@ -1165,11 +1134,10 @@ async function ytdlpCreateResource(url, title) {
       try { return await ytdlpPipe(url, []); } catch {}
     }
   }
-  // 4. SoundCloud fallback
+  // 4. SoundCloud fallback (play-dl ile direkt stream, yt-dlp gerektirmez)
   const scQuery = title || url;
   console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
-  const scUrl = await soundcloudSearch(scQuery);
-  return await soundcloudPipe(scUrl || scQuery);
+  return await soundcloudStream(scQuery);
 }
 
 async function playNext(guildId) {
