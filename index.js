@@ -1000,7 +1000,6 @@ const PIPED_INSTANCES = [
   "https://pipedapi.adminforge.de",
   "https://pipedapi.tokhmi.xyz",
 ];
-
 async function getInvidiousAudioUrl(videoId) {
   for (const instance of INVIDIOUS_INSTANCES) {
     try {
@@ -1051,7 +1050,6 @@ async function getPipedAudioUrl(videoId) {
   }
   return null;
 }
-
 function ffmpegFromUrl(audioUrl) {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
