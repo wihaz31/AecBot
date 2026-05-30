@@ -958,6 +958,7 @@ function ytdlpPipe(url, cookieArgs) {
     const ytdlp = spawn("yt-dlp", [
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
       "--no-playlist", "--extractor-args", "youtube:player_client=ios,web",
+      "--retries", "5", "--fragment-retries", "5", "--retry-sleep", "3",
       ...cookieArgs, "-o", "-", url
     ]);
     const ffmpeg = spawn("ffmpeg", [
