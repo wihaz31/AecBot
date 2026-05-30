@@ -1000,32 +1000,35 @@ const PIPED_INSTANCES = [
   "https://pipedapi.adminforge.de",
   "https://pipedapi.tokhmi.xyz",
 ];
+
+// URL'nin gerçekten audio stream sunup sunmadığını HEAD isteğiyle kontrol et
+async function isAudioUrlValid(url) {
+  try {
+    const r = await fetchWithTimeout(url, { method: "HEAD" }, 5000);
+    if (!r.ok) return false;
+    const ct = r.headers.get("content-type") || "";
+    return ct.includes("audio") || ct.includes("video") || ct.includes("octet");
+  } catch {
+    return false;
+  }
+}
+
+// Invidious /latest_version endpoint'i: adaptiveFormats'tan daha güvenilir proxy
 async function getInvidiousAudioUrl(videoId) {
+  const itags = [251, 250, 249, 140]; // opus 160k, opus 70k, opus 50k, m4a 128k
   for (const instance of INVIDIOUS_INSTANCES) {
-    try {
-      const r = await fetchWithTimeout(
-        `${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats&local=true`,
-        {}, 8000
-      );
-      if (!r.ok) continue;
-      const data = await r.json();
-      if (data.error) continue;
-      const formats = (data.adaptiveFormats || [])
-        .filter(f => f.type?.startsWith("audio/"))
-        .sort((a, b) => {
-          const aOpus = a.type?.includes("opus") ? 1 : 0;
-          const bOpus = b.type?.includes("opus") ? 1 : 0;
-          return bOpus - aOpus || (b.bitrate || 0) - (a.bitrate || 0);
-        });
-      if (!formats.length) continue;
-      const audioUrl = formats[0].url;
-      if (!audioUrl) continue;
-      const full = audioUrl.startsWith("http") ? audioUrl : `${instance}${audioUrl}`;
-      console.log(`[MÜZİK] Invidious stream: ${instance}`);
-      return full;
-    } catch (e) {
-      console.log(`[MÜZİK] Invidious ${instance} başarısız:`, e.message?.slice(0, 60));
+    for (const itag of itags) {
+      try {
+        const url = `${instance}/latest_version?id=${videoId}&itag=${itag}&local=true`;
+        const valid = await isAudioUrlValid(url);
+        if (!valid) continue;
+        console.log(`[MÜZİK] Invidious stream: ${instance} itag=${itag}`);
+        return url;
+      } catch (e) {
+        // Sonraki itag'i dene
+      }
     }
+    console.log(`[MÜZİK] Invidious ${instance} başarısız`);
   }
   return null;
 }
@@ -1042,6 +1045,9 @@ async function getPipedAudioUrl(videoId) {
       if (!streams.length) continue;
       const audioUrl = streams[0].url;
       if (!audioUrl) continue;
+      // URL'nin gerçekten erişilebilir olduğunu doğrula
+      const valid = await isAudioUrlValid(audioUrl);
+      if (!valid) { console.log(`[MÜZİK] Piped ${instance} URL erişilemez`); continue; }
       console.log(`[MÜZİK] Piped stream: ${instance}`);
       return audioUrl;
     } catch (e) {
@@ -1050,6 +1056,7 @@ async function getPipedAudioUrl(videoId) {
   }
   return null;
 }
+
 function ffmpegFromUrl(audioUrl) {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
@@ -1059,13 +1066,29 @@ function ffmpegFromUrl(audioUrl) {
       "-loglevel", "warning", "pipe:1"
     ]);
     let resolved = false;
-    ffmpeg.stderr.on("data", d => console.log("[ffmpeg-inv]", d.toString().slice(0, 150)));
+    let stderrBuf = "";
+    ffmpeg.stderr.on("data", d => {
+      const s = d.toString();
+      stderrBuf += s;
+      console.log("[ffmpeg-inv]", s.slice(0, 150));
+    });
     ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
+    ffmpeg.on("close", code => {
+      if (!resolved) {
+        resolved = true;
+        reject(new Error(`ffmpeg erken çıktı (kod ${code}): ${stderrBuf.slice(0, 120)}`));
+      }
+    });
     ffmpeg.stdout.once("readable", () => {
-      if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
+      if (!resolved) {
+        // Çok hızlı kapanma varsa yakında close eventi gelecek, küçük bekleme
+        setTimeout(() => {
+          if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
+        }, 200);
+      }
     });
     const timer = setTimeout(() => {
-      if (!resolved) { resolved = true; ffmpeg.kill(); reject(new Error("Invidious ffmpeg 30s timeout")); }
+      if (!resolved) { resolved = true; ffmpeg.kill(); reject(new Error("ffmpeg 30s timeout")); }
     }, 30000);
     ffmpeg.stdout.on("close", () => clearTimeout(timer));
   });
