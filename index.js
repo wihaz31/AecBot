@@ -1145,20 +1145,25 @@ async function ytdlpCreateResource(url, title) {
       console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
     }
   }
-  // 3. yt-dlp pipe
+  // 3. SoundCloud — datacenter CDN kısıtlamasını aşar, yt-dlp'den önce dene
+  const scQuery = title || url;
+  console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
+  try {
+    return await soundcloudPipe(scQuery);
+  } catch (e) {
+    console.log("[MÜZİK] SoundCloud başarısız:", e.message?.slice(0, 80));
+  }
+  // 4. Son çare: yt-dlp pipe (cookie geçerliyse veya farklı host'ta çalışırsa)
   const cookieArgs = ytdlpCookieArgs();
   try {
     return await ytdlpPipe(url, cookieArgs);
   } catch (e) {
     if (cookieArgs.length > 0) {
       console.log("[MÜZİK] Cookie'li deneme başarısız, retry:", e.message?.slice(0, 80));
-      try { return await ytdlpPipe(url, []); } catch {}
+      return await ytdlpPipe(url, []);
     }
+    throw e;
   }
-  // 4. SoundCloud fallback — datacenter IP CDN kısıtlamasını aşar
-  const scQuery = title || url;
-  console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
-  return await soundcloudPipe(scQuery);
 }
 
 async function playNext(guildId) {
