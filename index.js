@@ -437,7 +437,7 @@ const SKIN_PRICES = {
   "Tec-9 | Slag": 0.07, "XM1014 | Zombie Offensive": 0.06, "Nova | Dark Sigil": 0.07,
   "UMP-45 | Primal Saber": 0.08, "P90 | Vent Rush": 0.07,
   "Glock-18 | Block-18": 0.50, "AUG | Flux": 0.30, "MP5-SD | Condition Zero": 0.35,
-  "M249 | Warbird": 0.25, "FAMAS | Rapid Eye Movement": 0.40, "SSG 08 | Dezastre": 0.40,
+  "M249 | Warbird": 0.25, "FAMAS | Rapid Eye Movement": 0.40, "Desert Eagle | Trigger Discipline": 1.50, "SSG 08 | Dezastre": 0.40,
   "AWP | Chrome Cannon": 4.00, "MP7 | Guerrilla": 1.50,
   "M4A1-S | Jawbreaker": 5.00, "AK-47 | Leet Museo": 6.00, "USP-S | Stainless": 3.00,
   "M4A1-S | Mecha Industries": 30.00, "AK-47 | Violet Murano": 20.00,
