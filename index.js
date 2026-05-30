@@ -4,13 +4,10 @@ const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
-const fs = require("fs");
-const path = require("path");
 const { URL } = require("url");
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
-const playdl = require("play-dl");
-const { execFile, spawn } = require("child_process");
+const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { Player } = require("discord-player");
+const { YoutubeiExtractor } = require("discord-player-youtubei");
 
 /* =========================
    AYARLAR
@@ -21,7 +18,6 @@ const SEED_DAYS = 1500;
 const SEED_MAX = 150000;
 
 const MAX_MEMORY_MESSAGES = 40000;
-const RECENT_EXCLUDE = 100;
 
 let messageCounter = 0;
 let nextMessageTarget = Math.floor(Math.random() * 31) + 20;
@@ -694,6 +690,13 @@ function bjResolve(game) {
   return "berabere, para iade";
 }
 
+function bjButtons(disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('bj_hit').setLabel('Kart Çek ⬆️').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('bj_stand').setLabel('Dur 🛑').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+  );
+}
+
 /* =========================
    KELİME OYUNU
 ========================= */
@@ -797,138 +800,6 @@ async function getRobloxPresence() {
 }
 
 /* =========================
-   MÜZİK
-========================= */
-const musicQueues = new Map();
-
-const YT_COOKIE_FILE = "/tmp/yt-cookies.txt";
-if (process.env.YOUTUBE_COOKIE) {
-  try {
-    let content = process.env.YOUTUBE_COOKIE.replace(/\\n/g, "\n");
-    if (!content.includes("\n")) {
-      // Koyeb env var satır sonlarını boşluğa çevirmiş — düzelt
-      const entries = content.split(/ (?=\.youtube\.com\t)/);
-      content = "# Netscape HTTP Cookie File\n" + entries.join("\n");
-    }
-    fs.writeFileSync(YT_COOKIE_FILE, content);
-  } catch {}
-}
-function ytdlpCookieArgs() {
-  return process.env.YOUTUBE_COOKIE ? ["--cookies", YT_COOKIE_FILE] : [];
-}
-
-async function ytdlpGetInfo(url) {
-  try {
-    const r = await fetchWithTimeout(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
-      {}, 5000
-    );
-    if (r.ok) {
-      const data = await r.json();
-      return data.title || url;
-    }
-  } catch {}
-  return url;
-}
-
-async function ytdlpSearch(query) {
-  // play-dl ile ara (cookie'li, hızlı)
-  try {
-    const results = await playdl.search(query, { source: { youtube: "video" }, limit: 1 });
-    if (results.length > 0) return { title: results[0].title, url: results[0].url };
-  } catch {}
-  // Fallback: yt-dlp
-  return new Promise((resolve, reject) => {
-    let stderr = "";
-    const args = ["--no-playlist", "--print", "%(title)s", "--print", "%(webpage_url)s", "--no-warnings",
-      "--extractor-args", "youtube:player_client=ios,web",
-      "--socket-timeout", "10", ...ytdlpCookieArgs(), `ytsearch1:${query}`];
-    const proc = spawn("yt-dlp", args);
-    let stdout = "";
-    proc.stdout.on("data", d => { stdout += d; });
-    proc.stderr.on("data", d => { stderr += d; });
-    proc.on("close", code => {
-      if (code !== 0) return reject(new Error(stderr.slice(0, 200) || "yt-dlp hata kodu: " + code));
-      const lines = stdout.trim().split("\n");
-      if (lines.length < 2) return reject(new Error("Sonuç bulunamadı"));
-      resolve({ title: lines[0], url: lines[1] });
-    });
-    proc.on("error", reject);
-    setTimeout(() => { proc.kill(); reject(new Error("timeout")); }, 20000);
-  });
-}
-
-async function ytdlpCreateResource(url) {
-  return new Promise((resolve, reject) => {
-    const ytdlp = spawn("yt-dlp", [
-      "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
-      "--no-playlist", "--extractor-args", "youtube:player_client=android,web",
-      ...ytdlpCookieArgs(), "-o", "-", url
-    ]);
-    const ffmpeg = spawn("ffmpeg", [
-      "-i", "pipe:0",
-      "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
-      "-loglevel", "warning", "pipe:1"
-    ]);
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-
-    let ytErr = "";
-    let resolved = false;
-
-    ytdlp.stderr.on("data", d => { ytErr += d; });
-    ytdlp.on("close", code => {
-      if (code !== 0) {
-        console.log("[yt-dlp]", ytErr.slice(0, 500));
-        if (!resolved) { resolved = true; reject(new Error("yt-dlp hata: " + ytErr.slice(0, 200))); }
-      }
-    });
-    ffmpeg.stderr.on("data", d => console.log("[ffmpeg]", d.toString().slice(0, 200)));
-    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
-    ytdlp.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
-
-    // Gerçek veri gelene kadar resolve etme
-    ffmpeg.stdout.once("readable", () => {
-      if (!resolved) {
-        resolved = true;
-        resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
-      }
-    });
-
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        ytdlp.kill();
-        ffmpeg.kill();
-        reject(new Error("yt-dlp/ffmpeg 30s timeout"));
-      }
-    }, 30000);
-    ffmpeg.stdout.on("close", () => clearTimeout(timer));
-  });
-}
-
-async function playNext(guildId) {
-  const state = musicQueues.get(guildId);
-  if (!state) return;
-  if (state.queue.length === 0) {
-    state.current = null;
-    try { state.connection.destroy(); } catch {}
-    musicQueues.delete(guildId);
-    return;
-  }
-  const song = state.queue.shift();
-  state.current = song;
-  try {
-    const resource = await ytdlpCreateResource(song.url);
-    state.player.play(resource);
-    if (state.textChannel) await state.textChannel.send(`▶️ Şimdi çalıyor: **${song.title}**`);
-  } catch (e) {
-    console.error("[MÜZİK] playNext hatası:", e.message?.slice(0, 200));
-    if (state.textChannel) await state.textChannel.send("❌ Çalarken hata oluştu, atlanıyor...");
-    playNext(guildId);
-  }
-}
-
-/* =========================
    KİCK BİLDİRİMİ
 ========================= */
 let kickWasLive = false;
@@ -1027,6 +898,52 @@ async function askGemini(prompt, useFile = false, recentHistory = "") {
 }
 
 /* =========================
+   SLASH KOMUT TANIMLARI
+========================= */
+const SLASH_COMMANDS = [
+  { name: 'çal', description: 'Bir şarkı çal', options: [{ name: 'şarkı', description: 'Şarkı adı, YouTube veya Spotify linki', type: ApplicationCommandOptionType.String, required: true }] },
+  { name: 'dur', description: 'Müziği duraklat' },
+  { name: 'devam', description: 'Müziği devam ettir' },
+  { name: 'atla', description: 'Mevcut şarkıyı atla' },
+  { name: 'kuyruk', description: 'Müzik kuyruğunu göster' },
+  { name: 'çık', description: 'Ses kanalından çık' },
+  { name: 'bakiye', description: 'Para bakiyeni gör' },
+  { name: 'bonus', description: 'Günlük bonus al (500 🪙)' },
+  { name: 'ver', description: 'Birine para gönder', options: [
+    { name: 'kişi', description: 'Kişi', type: ApplicationCommandOptionType.User, required: true },
+    { name: 'miktar', description: 'Miktar', type: ApplicationCommandOptionType.Integer, required: true, minValue: 1 }
+  ]},
+  { name: 'sıralama', description: 'Para sıralaması' },
+  { name: 'zar', description: 'Zar at', options: [{ name: 'miktar', description: 'Bahis (sayı veya hepsi)', type: ApplicationCommandOptionType.String, required: true }] },
+  { name: 'tura', description: 'Yazı tura', options: [
+    { name: 'miktar', description: 'Bahis', type: ApplicationCommandOptionType.String, required: true },
+    { name: 'seçim', description: 'Yazı veya tura', type: ApplicationCommandOptionType.String, required: true, choices: [{ name: 'Yazı', value: 'yazı' }, { name: 'Tura', value: 'tura' }] }
+  ]},
+  { name: 'tkm', description: 'Taş kağıt makas', options: [
+    { name: 'miktar', description: 'Bahis', type: ApplicationCommandOptionType.String, required: true },
+    { name: 'seçim', description: 'Seçim', type: ApplicationCommandOptionType.String, required: true, choices: [{ name: 'Taş', value: 'taş' }, { name: 'Kağıt', value: 'kağıt' }, { name: 'Makas', value: 'makas' }] }
+  ]},
+  { name: 'bj', description: 'Blackjack oyna', options: [{ name: 'miktar', description: 'Bahis', type: ApplicationCommandOptionType.String, required: true }] },
+  { name: 'slot', description: 'Slot makinesi', options: [{ name: 'miktar', description: 'Bahis', type: ApplicationCommandOptionType.String, required: true }] },
+  { name: 'tahmin', description: 'Sayı tahmin oyunu başlat' },
+  { name: 'kelime', description: 'Kelime oyunu başlat' },
+  { name: 'kelimeson', description: 'Kelime oyununu bitir' },
+  { name: 'kasalar', description: 'CS2 kasalarını listele' },
+  { name: 'kasa', description: 'CS2 kasası aç', options: [{ name: 'tip', description: 'Kasa türü', type: ApplicationCommandOptionType.String, required: true, choices: [
+    { name: 'Recoil Case', value: 'recoil' }, { name: 'Revolution Case', value: 'revolution' },
+    { name: 'Kilowatt Case', value: 'kilowatt' }, { name: 'Gamma 2 Case', value: 'gamma2' },
+    { name: 'Dreams & Nightmares', value: 'dreams' }, { name: 'Chroma 2 Case', value: 'chroma' },
+    { name: 'Cobblestone Package', value: 'cobblestone' }
+  ]}]},
+  { name: 'envanter', description: 'CS2 envanterini gör', options: [{ name: 'kişi', description: 'Kullanıcı (boş = kendin)', type: ApplicationCommandOptionType.User, required: false }] },
+  { name: 'ai', description: 'Yapay zeka ile konuş', options: [{ name: 'mesaj', description: 'Mesajın', type: ApplicationCommandOptionType.String, required: false }] },
+  { name: 'hafıza', description: 'Eski bir mesajı hatırla' },
+  { name: 'gökhan', description: "Gökhan Roblox'ta mı?" },
+  { name: 'roblox', description: 'Roblox oyun durumu' },
+  { name: 'yardım', description: 'Komut listesi' },
+];
+
+/* =========================
    DİSCORD
 ========================= */
 const client = new Client({
@@ -1041,28 +958,34 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
+const player = new Player(client);
+player.extractors.register(YoutubeiExtractor, {});
+player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor');
+
+/* =========================
+   PLAYER EVENTS
+========================= */
+player.events.on('playerStart', (queue, track) => {
+  queue.metadata?.channel?.send(`▶️ Şimdi çalıyor: **${track.title}**`).catch(() => {});
+});
+player.events.on('audioTrackAdd', (queue, track) => {
+  // kuyruğa eklendi mesajı interactionCreate'te gönderiliyor, burada gönderme
+});
+player.events.on('playerError', (queue, error) => {
+  console.error('[PLAYER] Hata:', error.message);
+  queue.metadata?.channel?.send('❌ Çalarken hata oluştu, atlanıyor...').catch(() => {});
+});
+player.events.on('error', (queue, error) => {
+  console.error('[PLAYER] Queue hatası:', error.message);
+});
+
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
   setInterval(checkKick, 2 * 60 * 1000);
   checkKick();
-  const playdlToken = {};
-  if (process.env.YOUTUBE_COOKIE) {
-    playdlToken.youtube = { cookie: process.env.YOUTUBE_COOKIE };
-  }
-  if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
-    playdlToken.spotify = {
-      client_id: process.env.SPOTIFY_CLIENT_ID,
-      client_secret: process.env.SPOTIFY_CLIENT_SECRET,
-      refresh_token: "",
-      access_token: "",
-    };
-  }
-  if (Object.keys(playdlToken).length > 0) {
-    try {
-      await playdl.setToken(playdlToken);
-      console.log("[MÜZİK] play-dl token ayarlandı:", Object.keys(playdlToken).join(", "));
-    } catch { console.log("[MÜZİK] play-dl token ayarlanamadı"); }
-  }
+
+  await client.application.commands.set(SLASH_COMMANDS);
+  console.log('[BOT] Slash komutları kaydedildi');
 
   const [savedEconomy, savedInventory] = await Promise.all([
     redisGet("economy"),
@@ -1178,6 +1101,389 @@ http.createServer((req, res) => {
 }).listen(PORT, () => console.log(`[HTTP] Port ${PORT}`));
 
 /* =========================
+   INTERACTION HANDLER
+========================= */
+client.on('interactionCreate', async (interaction) => {
+  // Blackjack butonu
+  if (interaction.isButton()) {
+    if (interaction.customId !== 'bj_hit' && interaction.customId !== 'bj_stand') return;
+    const game = bjGames.get(interaction.user.id);
+    if (!game) { await interaction.reply({ content: 'Aktif oyunun yok.', flags: 64 }); return; }
+
+    if (interaction.customId === 'bj_hit') {
+      game.playerHand.push(game.deck.pop());
+      if (bjHandVal(game.playerHand) > 21) {
+        bjGames.delete(interaction.user.id);
+        setBalance(game.userId, getBalance(game.userId) - game.bet);
+        await interaction.update({ content: `Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\nBUST! -${game.bet} 🪙 | Bakiye: ${getBalance(game.userId)} 🪙`, components: [bjButtons(true)] });
+      } else {
+        await interaction.update({ content: `Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand, true)}\nBahis: ${game.bet} 🪙`, components: [bjButtons()] });
+      }
+    } else {
+      bjDealerPlay(game);
+      const result = bjResolve(game);
+      bjGames.delete(interaction.user.id);
+      await interaction.update({ content: `Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\n${result} | Bakiye: ${getBalance(game.userId)} 🪙`, components: [bjButtons(true)] });
+    }
+    return;
+  }
+
+  if (!interaction.isChatInputCommand()) return;
+  const cmd = interaction.commandName;
+
+  // === MÜZİK ===
+  if (cmd === 'çal') {
+    const voiceChannel = interaction.member?.voice?.channel;
+    if (!voiceChannel) { await interaction.reply({ content: 'Önce bir ses kanalına gir!', flags: 64 }); return; }
+    const query = interaction.options.getString('şarkı');
+    await interaction.deferReply();
+    try {
+      const { track } = await player.play(voiceChannel, query, {
+        nodeOptions: {
+          metadata: { channel: interaction.channel },
+          leaveOnEmpty: true, leaveOnEmptyCooldown: 30000,
+          leaveOnEnd: true, leaveOnEndCooldown: 30000,
+          volume: 75,
+        },
+      });
+      await interaction.editReply(`➕ Kuyruğa eklendi: **${track.title}**`);
+    } catch (e) {
+      await interaction.editReply(`❌ Hata: ${e.message?.slice(0, 100)}`);
+    }
+    return;
+  }
+
+  if (cmd === 'dur') {
+    const queue = player.nodes.get(interaction.guildId);
+    if (!queue?.currentTrack) { await interaction.reply('Şu an çalan bir şey yok.'); return; }
+    queue.node.pause();
+    await interaction.reply('⏸️ Duraklatıldı.');
+    return;
+  }
+
+  if (cmd === 'devam') {
+    const queue = player.nodes.get(interaction.guildId);
+    if (!queue) { await interaction.reply('Şu an çalan bir şey yok.'); return; }
+    queue.node.resume();
+    await interaction.reply('▶️ Devam ediyor.');
+    return;
+  }
+
+  if (cmd === 'atla') {
+    const queue = player.nodes.get(interaction.guildId);
+    if (!queue?.currentTrack) { await interaction.reply('Atlanacak bir şey yok.'); return; }
+    queue.node.skip();
+    await interaction.reply('⏭️ Atlandı.');
+    return;
+  }
+
+  if (cmd === 'kuyruk') {
+    const queue = player.nodes.get(interaction.guildId);
+    if (!queue?.currentTrack) { await interaction.reply('Kuyruk boş.'); return; }
+    const lines = [`▶️ **${queue.currentTrack.title}** (çalıyor)`];
+    queue.tracks.data.forEach((t, i) => lines.push(`${i + 1}. ${t.title}`));
+    await interaction.reply(lines.slice(0, 20).join('\n'));
+    return;
+  }
+
+  if (cmd === 'çık') {
+    const queue = player.nodes.get(interaction.guildId);
+    if (!queue) { await interaction.reply('Ses kanalında değilim.'); return; }
+    queue.delete();
+    await interaction.reply('👋 Ses kanalından çıkıldı.');
+    return;
+  }
+
+  // === EKONOMİ ===
+  if (cmd === 'bakiye') {
+    await interaction.reply(`bakiyen: **${getBalance(interaction.user.id)}** 🪙`);
+    return;
+  }
+
+  if (cmd === 'bonus') {
+    const now = Date.now();
+    const last = lastBonus.get(interaction.user.id) || 0;
+    if (now - last < BONUS_COOLDOWN) {
+      const kalan = BONUS_COOLDOWN - (now - last);
+      await interaction.reply(`bonus zaten alındı. kalan: ${formatDuration(kalan)}`);
+      return;
+    }
+    lastBonus.set(interaction.user.id, now);
+    setBalance(interaction.user.id, getBalance(interaction.user.id) + BONUS_AMOUNT);
+    await interaction.reply(`günlük bonus +${BONUS_AMOUNT} 🪙 | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    return;
+  }
+
+  if (cmd === 'ver') {
+    const target = interaction.options.getUser('kişi');
+    const amount = interaction.options.getInteger('miktar');
+    if (target.id === interaction.user.id || target.bot) { await interaction.reply('Geçersiz hedef.'); return; }
+    const bal = getBalance(interaction.user.id);
+    if (amount > bal) { await interaction.reply(`yetersiz bakiye! Bakiyen: ${bal} 🪙`); return; }
+    setBalance(interaction.user.id, bal - amount);
+    setBalance(target.id, getBalance(target.id) + amount);
+    await interaction.reply(`${target.username}'a **${amount}** 🪙 gönderildi`);
+    return;
+  }
+
+  if (cmd === 'sıralama') {
+    await interaction.deferReply();
+    const sorted = [...balances.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if (sorted.length === 0) { await interaction.editReply('henüz bakiye kaydı yok'); return; }
+    const medals = ['🥇','🥈','🥉'];
+    const lines = await Promise.all(sorted.map(async ([uid, bal], i) => {
+      let name;
+      try { const u = await client.users.fetch(uid); name = u.username; } catch { name = uid; }
+      return `${medals[i] || `${i+1}.`} **${name}** — ${bal} 🪙`;
+    }));
+    await interaction.editReply('**para sıralaması:**\n' + lines.join('\n'));
+    return;
+  }
+
+  // === OYUNLAR ===
+  if (cmd === 'zar') {
+    const bet = parseBet(interaction.options.getString('miktar'), interaction.user.id);
+    if (!bet) { await interaction.reply(`geçersiz miktar. bakiyen: ${getBalance(interaction.user.id)} 🪙`); return; }
+    const ur = Math.floor(Math.random() * 6) + 1;
+    const br = Math.floor(Math.random() * 6) + 1;
+    const bal = getBalance(interaction.user.id);
+    let result;
+    if (ur > br) { setBalance(interaction.user.id, bal + bet); result = `kazandın +${bet} 🪙`; }
+    else if (ur < br) { setBalance(interaction.user.id, bal - bet); result = `kaybettin -${bet} 🪙`; }
+    else result = 'berabere, para iade';
+    await interaction.reply(`Sen: **${ur}** | Ben: **${br}** — ${result} | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    return;
+  }
+
+  if (cmd === 'tura') {
+    const bet = parseBet(interaction.options.getString('miktar'), interaction.user.id);
+    const choice = interaction.options.getString('seçim');
+    if (!bet) { await interaction.reply(`geçersiz miktar. bakiyen: ${getBalance(interaction.user.id)} 🪙`); return; }
+    const result = Math.random() < 0.5 ? 'yazı' : 'tura';
+    const bal = getBalance(interaction.user.id);
+    if (result === choice) {
+      setBalance(interaction.user.id, bal + bet);
+      await interaction.reply(`**${result}** — kazandın +${bet} 🪙 | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    } else {
+      setBalance(interaction.user.id, bal - bet);
+      await interaction.reply(`**${result}** — kaybettin -${bet} 🪙 | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    }
+    return;
+  }
+
+  if (cmd === 'tkm') {
+    const bet = parseBet(interaction.options.getString('miktar'), interaction.user.id);
+    const choice = foldTR(interaction.options.getString('seçim'));
+    if (!bet) { await interaction.reply(`geçersiz miktar. bakiyen: ${getBalance(interaction.user.id)} 🪙`); return; }
+    const names = { tas: 'taş', kagit: 'kağıt', makas: 'makas' };
+    const beats = { tas: 'makas', kagit: 'tas', makas: 'kagit' };
+    const options = ['tas', 'kagit', 'makas'];
+    const bot = options[Math.floor(Math.random() * 3)];
+    const bal = getBalance(interaction.user.id);
+    let result;
+    if (choice === bot) result = 'berabere, para iade';
+    else if (beats[choice] === bot) { setBalance(interaction.user.id, bal + bet); result = `kazandın +${bet} 🪙`; }
+    else { setBalance(interaction.user.id, bal - bet); result = `kaybettin -${bet} 🪙`; }
+    await interaction.reply(`Sen: **${names[choice] || choice}** | Ben: **${names[bot]}** — ${result} | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    return;
+  }
+
+  if (cmd === 'bj') {
+    const bet = parseBet(interaction.options.getString('miktar'), interaction.user.id);
+    if (!bet) { await interaction.reply(`geçersiz miktar. bakiyen: ${getBalance(interaction.user.id)} 🪙`); return; }
+    const deck = bjDeck();
+    const playerHand = [deck.pop(), deck.pop()];
+    const dealerHand = [deck.pop(), deck.pop()];
+    if (bjHandVal(playerHand) === 21) {
+      bjDealerPlay({ dealerHand, deck });
+      const result = bjResolve({ playerHand, dealerHand, bet, userId: interaction.user.id });
+      await interaction.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand)}\nBlackjack! ${result} | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+      return;
+    }
+    bjGames.set(interaction.user.id, { deck, playerHand, dealerHand, bet, userId: interaction.user.id });
+    await interaction.reply({ content: `Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand, true)}\nBahis: ${bet} 🪙`, components: [bjButtons()] });
+    return;
+  }
+
+  if (cmd === 'slot') {
+    const bet = parseBet(interaction.options.getString('miktar'), interaction.user.id);
+    if (!bet) { await interaction.reply(`geçersiz miktar. bakiyen: ${getBalance(interaction.user.id)} 🪙`); return; }
+    const symbols = [
+      { e: '🍒', w: 30 }, { e: '🍋', w: 25 }, { e: '🍊', w: 20 },
+      { e: '🍇', w: 15 }, { e: '🔔', w: 6 }, { e: '⭐', w: 3 },
+      { e: '💎', w: 1 }, { e: '7️⃣', w: 1 },
+    ];
+    const totalW = symbols.reduce((s, x) => s + x.w, 0);
+    function spin() {
+      let r = Math.random() * totalW;
+      for (const s of symbols) { r -= s.w; if (r <= 0) return s.e; }
+      return symbols[0].e;
+    }
+    const reels = [spin(), spin(), spin()];
+    const line = reels.join(' | ');
+    const bal = getBalance(interaction.user.id);
+    let result, delta;
+    if (reels[0] === reels[1] && reels[1] === reels[2]) {
+      const mult = reels[0] === '💎' ? 20 : reels[0] === '7️⃣' ? 10 : reels[0] === '⭐' ? 5 : reels[0] === '🔔' ? 4 : 3;
+      delta = bet * mult - bet;
+      setBalance(interaction.user.id, bal + delta);
+      result = `🎉 üçlü! x${mult} → +${delta} 🪙`;
+    } else if (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]) {
+      delta = 0;
+      result = 'ikili — para iade';
+    } else {
+      delta = -bet;
+      setBalance(interaction.user.id, bal - bet);
+      result = `-${bet} 🪙`;
+    }
+    await interaction.reply(`[ ${line} ]\n${result} | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    return;
+  }
+
+  if (cmd === 'tahmin') {
+    const num = Math.floor(Math.random() * 100) + 1;
+    guessGames.set(interaction.channelId, { number: num });
+    await interaction.reply('1 ile 100 arasında bir sayı tuttum. Beni mention yaparak tahmin et!');
+    return;
+  }
+
+  if (cmd === 'kelime') {
+    const word = getStartWord();
+    wordGames.set(interaction.channelId, { lastWord: word, requiredLetter: wordLastLetter(word), usedWords: new Set([word]), lastPlayerId: null });
+    await interaction.reply(`kelime oyunu başladı! **${word}** — sıradaki kelime **'${wordLastLetter(word)}'** ile başlamalı`);
+    return;
+  }
+
+  if (cmd === 'kelimeson') {
+    if (wordGames.has(interaction.channelId)) wordGames.delete(interaction.channelId);
+    await interaction.reply('kelime oyunu bitti');
+    return;
+  }
+
+  // === CS2 ===
+  if (cmd === 'kasalar') {
+    const lines = Object.entries(CASES).map(([key, c]) => `**${c.name}** (\`/kasa ${key}\`) — ${c.cost} 🪙`);
+    await interaction.reply(`**CS2 Kasaları:**\n${lines.join('\n')}\n\nNadirlik: ⬜ %79.9 | 🟦 %16.0 | 🟪 %3.2 | 🔵 %0.64 | 🩷 %0.26 | 🔴 %0.064 | 🟡 %0.026`);
+    return;
+  }
+
+  if (cmd === 'kasa') {
+    const key = interaction.options.getString('tip');
+    const caseData = CASES[key];
+    if (!caseData) { await interaction.reply('Bilinmeyen kasa.'); return; }
+    const bal = getBalance(interaction.user.id);
+    if (bal < caseData.cost) { await interaction.reply(`yetersiz bakiye! Bu kasa ${caseData.cost} 🪙. Bakiyen: ${bal} 🪙`); return; }
+    setBalance(interaction.user.id, bal - caseData.cost);
+    const rarity = rollRarity();
+    const skinPool = caseData.skins[rarity];
+    const skin = skinPool[Math.floor(Math.random() * skinPool.length)];
+    const condition = rollCondition();
+    const isStatTrak = ['milspec','restricted','classified','covert','knife'].includes(rarity) && Math.random() < 0.1;
+    const stPrefix = isStatTrak ? 'StatTrak™ ' : '';
+    const fullName = `${stPrefix}${skin} (${condition.short})`;
+    const info = RARITY_INFO[rarity];
+    const basePrice = SKIN_PRICES[skin];
+    let coinReward;
+    if (basePrice !== undefined) {
+      const condMult = CONDITION_COIN_MULT[condition.short] ?? 0.28;
+      coinReward = Math.max(info.coinMin, Math.round(basePrice * condMult * COIN_RATE));
+    } else {
+      coinReward = info.coinMin + Math.floor(Math.random() * (info.coinMax - info.coinMin + 1));
+    }
+    if (isStatTrak) coinReward = Math.floor(coinReward * 1.5);
+    const savesToInventory = ['restricted','classified','covert','knife'].includes(rarity);
+    setBalance(interaction.user.id, getBalance(interaction.user.id) + coinReward);
+    if (savesToInventory) addToInventory(interaction.user.id, interaction.user.username, { name: fullName, rarity, case: caseData.name, date: new Date().toISOString() });
+    const rarityLabel = `${info.color} ${info.label}`;
+    const stNote = isStatTrak ? ' *(StatTrak™ +50%)*' : '';
+    const inventoryNote = savesToInventory ? `\n📦 **Envantere eklendi!** +${coinReward} 🪙${stNote}` : `\n+${coinReward} 🪙${stNote}`;
+    await interaction.reply(`🎰 **${caseData.name}** açıldı!\n\n${rarityLabel}\n🔫 **${fullName}**${inventoryNote}\n\nYeni bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    return;
+  }
+
+  if (cmd === 'envanter') {
+    await interaction.deferReply();
+    const targetUser = interaction.options.getUser('kişi') || interaction.user;
+    const targetId = targetUser.id;
+    const targetName = targetUser.username;
+    const inv = inventory[targetId];
+    if (!inv || inv.items.length === 0) {
+      await interaction.editReply(targetId === interaction.user.id ? 'envanterin boş! kasa açarak nadir skinler kazanabilirsin.' : `**${targetName}** kullanıcısının envanteri boş.`);
+      return;
+    }
+    const rarityOrder = ['knife','covert','classified','restricted','milspec'];
+    const sorted = [...inv.items].sort((a, b) => rarityOrder.indexOf(a.rarity) - rarityOrder.indexOf(b.rarity));
+    const lines = sorted.map((item, i) => `${i + 1}. ${RARITY_INFO[item.rarity]?.color || ''} ${item.name}`);
+    const chunks = [];
+    let chunk = [];
+    for (const line of lines) {
+      chunk.push(line);
+      if (chunk.length === 15) { chunks.push(chunk.join('\n')); chunk = []; }
+    }
+    if (chunk.length) chunks.push(chunk.join('\n'));
+    await interaction.editReply(`**${targetName}** envanteri (${sorted.length} item):\n${chunks[0]}`);
+    for (let i = 1; i < chunks.length; i++) await interaction.followUp(chunks[i]);
+    return;
+  }
+
+  // === DİĞER ===
+  if (cmd === 'ai') {
+    await interaction.deferReply();
+    const query = interaction.options.getString('mesaj') || 'naber';
+    const recentHistory = await fetchRecentHistory(null, 8);
+    const out = await askGemini(query, false, recentHistory) || randomSentence() || 'hmm';
+    await interaction.editReply(out);
+    return;
+  }
+
+  if (cmd === 'hafıza') {
+    const usable = memory.filter(m => m.includes(': ') && m.length > 15 && m.length < 200);
+    if (usable.length === 0) { await interaction.reply('henüz hafızam boş'); return; }
+    const entry = usable[Math.floor(Math.random() * usable.length)];
+    const colon = entry.indexOf(': ');
+    const who = entry.slice(0, colon);
+    const said = entry.slice(colon + 2);
+    await interaction.reply(`bir zamanlar **${who}** şöyle demişti:\n> ${said}`);
+    return;
+  }
+
+  if (cmd === 'gökhan') {
+    await interaction.deferReply();
+    const presence = await getRobloxPresence();
+    if (!presence) { await interaction.editReply('Roblox durumu çekemedim.'); return; }
+    if (!presence.online) { await interaction.editReply('offline.'); return; }
+    if (presence.inGame) await interaction.editReply(`Gökhan yine Robloxta aq.\nOyun: ${presence.gameName || 'bilinmiyor'}`);
+    else await interaction.editReply('Gökhan Studio\'da nabıyon aq.');
+    return;
+  }
+
+  if (cmd === 'roblox') {
+    await interaction.deferReply();
+    const presence = await getRobloxPresence();
+    if (!presence) { await interaction.editReply('bilgi alınamadı'); return; }
+    if (!presence.online) { await interaction.editReply('şu an çevrimdışı'); return; }
+    if (presence.inGame) await interaction.editReply(`oyunda: **${presence.gameName || 'bilinmiyor'}**`);
+    else await interaction.editReply('çevrimiçi ama oyunda değil');
+    return;
+  }
+
+  if (cmd === 'yardım') {
+    await interaction.reply([
+      '**komutlar:**',
+      '`/ai` — yapay zeka',
+      '`/bakiye` / `/bonus` — para',
+      '`/zar` / `/tura` / `/tkm` / `/bj` / `/slot` — oyunlar',
+      '`/ver` / `/sıralama` — ekonomi',
+      '`/çal` / `/dur` / `/devam` / `/atla` / `/kuyruk` / `/çık` — müzik',
+      '`/kelime` / `/kelimeson` / `/tahmin` — sözel oyunlar',
+      '`/kasalar` / `/kasa` / `/envanter` — CS2',
+      '`/hafıza` / `/gökhan` / `/roblox` — diğer',
+    ].join('\n'));
+    return;
+  }
+});
+
+/* =========================
    MESAJ İŞLEYİCİ
 ========================= */
 client.on("messageCreate", async (message) => {
@@ -1251,208 +1557,6 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
-    if (isDM && !lower.startsWith("*")) {
-      console.log(`DM from admin: ${content}`);
-      const targetChannel = await client.channels.fetch(SEED_CHANNEL_ID);
-      if (targetChannel?.isTextBased()) await targetChannel.send(content);
-      return;
-    }
-  }
-
-  if (lower === "*yardim" || lower === "*yardım" || lower === "*help") {
-    await message.reply([
-      "**komutlar:**",
-      "`*ai [mesaj]` — yapay zeka",
-      "`*bakiye` / `*para` — para bakiyesi",
-      "`*bonus` — günlük 500 🪙",
-      "`*zar [miktar]` — zar bahsi",
-      "`*tura [miktar] yazı/tura` — yazı tura",
-      "`*tkm` / `*rps [miktar] taş/kağıt/makas` — taş kağıt makas",
-      "`*bj [miktar]` — blackjack (⬆️ kart • 🛑 dur)",
-      "`*ver @kişi [miktar]` — para gönder",
-      "`*çal [şarkı adı / YouTube URL / Spotify URL]` — müzik çal",
-      "`*dur` / `*devam` / `*atla` / `*kuyruk` / `*çık` — müzik kontrol",
-      "`*kelime` — kelime oyunu başlat",
-      "`*kelimeson` — kelime oyunu bitir",
-      "`*slot [miktar]` — slot makinesi",
-      "`*hafıza` — eski bir mesajı hatırla",
-      "`*kasalar` — CS2 kasalarını listele",
-      "`*kasa [recoil|revolution|kilowatt|gamma2|dreams|chroma|cobblestone]` — kasa aç",
-      "`*envanter [@kişi]` — CS2 envanteri",
-      "`*gökhan`",
-    ].join("\n"));
-    return;
-  }
-
-  if (lower.startsWith("*çal ") || lower.startsWith("*cal ")) {
-    const voiceChannel = message.member?.voice?.channel;
-    if (!voiceChannel) { await message.reply("Bir ses kanalında olman gerekiyor!"); return; }
-    const query = content.slice(content.indexOf(" ") + 1).trim();
-    if (!query) { await message.reply("Kullanım: `*çal [şarkı adı / YouTube URL / Spotify URL]`"); return; }
-    let song;
-    try {
-      // youtu.be/ID?list=... veya watch?v=ID&list=... gibi URL'lerde video ID'yi çıkar
-      const ytVidMatch = query.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
-      const urlType = await playdl.validate(query);
-      if (urlType === "yt_video" || (ytVidMatch && (urlType === "yt_playlist" || !urlType))) {
-        const videoUrl = ytVidMatch ? `https://www.youtube.com/watch?v=${ytVidMatch[1]}` : query;
-        const title = await ytdlpGetInfo(videoUrl);
-        song = { url: videoUrl, title: title || videoUrl };
-      } else if (urlType === "sp_track") {
-        const spData = await playdl.spotify(query);
-        const searchQ = `${spData.name} ${spData.artists?.[0]?.name || ""}`.trim();
-        const result = await ytdlpSearch(searchQ);
-        song = { url: result.url, title: `${spData.name}${spData.artists?.[0]?.name ? " - " + spData.artists[0].name : ""}` };
-      } else {
-        const result = await ytdlpSearch(query);
-        song = result;
-      }
-    } catch (e) {
-      const msg = e?.message || "";
-      if (msg.includes("ENOENT") || msg.includes("not found") || msg.includes("spawn")) {
-        await message.reply("❌ yt-dlp kurulu değil, sunucuyu yeniden başlat.");
-      } else {
-        await message.reply(`❌ Şarkı bulunamadı: ${msg.slice(0, 100)}`);
-      }
-      return;
-    }
-    if (!musicQueues.has(message.guildId)) {
-      const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: message.guildId,
-        adapterCreator: message.guild.voiceAdapterCreator,
-      });
-      const player = createAudioPlayer();
-      connection.subscribe(player);
-      player.on(AudioPlayerStatus.Idle, () => playNext(message.guildId));
-      musicQueues.set(message.guildId, { connection, player, queue: [], current: null, textChannel: message.channel });
-    }
-    const state = musicQueues.get(message.guildId);
-    state.queue.push(song);
-    if (!state.current) {
-      playNext(message.guildId);
-    } else {
-      await message.reply(`➕ Kuyruğa eklendi: **${song.title}**`);
-    }
-    return;
-  }
-
-  if (lower === "*dur") {
-    const state = musicQueues.get(message.guildId);
-    if (!state?.current) { await message.reply("Şu an çalan bir şey yok."); return; }
-    state.player.pause();
-    await message.reply("⏸️ Duraklatldı.");
-    return;
-  }
-
-  if (lower === "*devam") {
-    const state = musicQueues.get(message.guildId);
-    if (!state) { await message.reply("Şu an çalan bir şey yok."); return; }
-    state.player.unpause();
-    await message.reply("▶️ Devam ediyor.");
-    return;
-  }
-
-  if (lower === "*atla") {
-    const state = musicQueues.get(message.guildId);
-    if (!state?.current) { await message.reply("Atlanacak bir şey yok."); return; }
-    state.player.stop();
-    await message.reply("⏭️ Atlandı.");
-    return;
-  }
-
-  if (lower === "*kuyruk") {
-    const state = musicQueues.get(message.guildId);
-    if (!state?.current) { await message.reply("Kuyruk boş."); return; }
-    const lines = [`▶️ **${state.current.title}** (çalıyor)`];
-    state.queue.forEach((s, i) => lines.push(`${i + 1}. ${s.title}`));
-    await message.reply(lines.join("\n"));
-    return;
-  }
-
-  if (lower === "*çık" || lower === "*cik") {
-    const state = musicQueues.get(message.guildId);
-    if (!state) { await message.reply("Ses kanalında değilim."); return; }
-    state.queue = [];
-    state.player.stop();
-    try { state.connection.destroy(); } catch {}
-    musicQueues.delete(message.guildId);
-    await message.reply("👋 Ses kanalından çıkıldı.");
-    return;
-  }
-
-  if (lower === "*gökhan" || lower === "*gokhan") {
-    const presence = await getRobloxPresence();
-    if (!presence) { await message.reply("Roblox durumu çekemedim."); return; }
-    if (!presence.online) { await message.reply("offline."); return; }
-    if (presence.inGame) {
-      await message.reply(`Gökhan yine Robloxta aq.\nOyun: ${presence.gameName || "bilinmiyor"}`);
-    } else {
-      await message.reply("Gökhan Studio'da nabıyon aq.");
-    }
-    return;
-  }
-
-  if (lower === "*bakiye" || lower === "*para") {
-    await message.reply(`bakiyen: **${getBalance(message.author.id)}** 🪙`);
-    return;
-  }
-
-  if (lower === "*bonus") {
-    const now = Date.now();
-    const last = lastBonus.get(message.author.id) || 0;
-    if (now - last < BONUS_COOLDOWN) {
-      const kalan = BONUS_COOLDOWN - (now - last);
-      await message.reply(`bonus zaten alındı. kalan: ${formatDuration(kalan)}`);
-      return;
-    }
-    lastBonus.set(message.author.id, now);
-    setBalance(message.author.id, getBalance(message.author.id) + BONUS_AMOUNT);
-    await message.reply(`günlük bonus +${BONUS_AMOUNT} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
-    return;
-  }
-
-  if (lower.startsWith("*bj")) {
-    const parts = content.split(/\s+/);
-    const bet = parseBet(parts[1], message.author.id);
-    if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
-    const deck = bjDeck();
-    const playerHand = [deck.pop(), deck.pop()];
-    const dealerHand = [deck.pop(), deck.pop()];
-    if (bjHandVal(playerHand) === 21) {
-      bjDealerPlay({ dealerHand, deck });
-      const result = bjResolve({ playerHand, dealerHand, bet, userId: message.author.id });
-      await message.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand)}\nBlackjack! ${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
-      return;
-    }
-    const sent = await message.reply(`Sen: ${bjShowHand(playerHand)}\nDealer: ${bjShowHand(dealerHand, true)}\nBahis: ${bet} 🪙 | ⬆️ kart çek • 🛑 dur`);
-    bjGames.set(message.author.id, { deck, playerHand, dealerHand, bet, userId: message.author.id, messageId: sent.id, channelId: sent.channelId });
-    await sent.react("⬆️");
-    await sent.react("🛑");
-    return;
-  }
-
-  if (lower === "*kelime") {
-    const word = getStartWord();
-    wordGames.set(message.channelId, { lastWord: word, requiredLetter: wordLastLetter(word), usedWords: new Set([word]), lastPlayerId: null });
-    await message.channel.send(`kelime oyunu başladı! **${word}** — sıradaki kelime **'${wordLastLetter(word)}'** ile başlamalı`);
-    return;
-  }
-
-  if (lower === "*kelimeson" || lower === "*kelimedur") {
-    if (wordGames.has(message.channelId)) {
-      wordGames.delete(message.channelId);
-      await message.channel.send("kelime oyunu bitti");
-    }
-    return;
-  }
-
-  if (lower.startsWith("*ai")) {
-    const query = content.slice(3).trim();
-    const recentHistory = await fetchRecentHistory(message.channel, 8);
-    const out = await askGemini(query || "naber", false, recentHistory) || randomSentence();
-    await message.reply(out);
-    return;
   }
 
   if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
@@ -1518,254 +1622,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  if (lower.startsWith("*tahmin")) {
-    const num = Math.floor(Math.random() * 100) + 1;
-    guessGames.set(message.channelId, { number: num });
-    await message.channel.send("1 ile 100 arasında bir sayı tuttum. @beni mention yaparak tahmin et!");
-    return;
-  }
-
-  if (lower.startsWith("*ver")) {
-    const target = message.mentions.users.first();
-    const parts = content.split(/\s+/);
-    const bet = parseBet(parts[parts.length - 1], message.author.id);
-    if (!target || !bet || target.id === message.author.id || target.bot) {
-      await message.reply("kullanım: *ver @kişi miktar");
-      return;
-    }
-    setBalance(message.author.id, getBalance(message.author.id) - bet);
-    setBalance(target.id, getBalance(target.id) + bet);
-    await message.reply(`${target.username}'a **${bet}** 🪙 gönderildi`);
-    return;
-  }
-
-  if (lower === "*sıralama" || lower === "*siralama") {
-    const sorted = [...balances.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-    if (sorted.length === 0) { await message.reply("henüz bakiye kaydı yok"); return; }
-    const medals = ["🥇","🥈","🥉"];
-    const lines = await Promise.all(sorted.map(async ([uid, bal], i) => {
-      let name;
-      try { const u = await client.users.fetch(uid); name = u.username; } catch { name = uid; }
-      const prefix = medals[i] || `${i + 1}.`;
-      return `${prefix} **${name}** — ${bal} 🪙`;
-    }));
-    await message.reply("**para sıralaması:**\n" + lines.join("\n"));
-    return;
-  }
-
-  if (lower === "*hafıza" || lower === "*hafiza") {
-    const usable = memory.filter(m => m.includes(": ") && m.length > 15 && m.length < 200);
-    if (usable.length === 0) { await message.reply("henüz hafızam boş"); return; }
-    const entry = usable[Math.floor(Math.random() * usable.length)];
-    const colon = entry.indexOf(": ");
-    const who = entry.slice(0, colon);
-    const said = entry.slice(colon + 2);
-    await message.reply(`bir zamanlar **${who}** şöyle demişti:\n> ${said}`);
-    return;
-  }
-
-  if (lower.startsWith("*slot")) {
-    const parts = content.split(/\s+/);
-    const bet = parseBet(parts[1], message.author.id);
-    if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
-    const symbols = [
-      { e: "🍒", w: 30 }, { e: "🍋", w: 25 }, { e: "🍊", w: 20 },
-      { e: "🍇", w: 15 }, { e: "🔔", w: 6 }, { e: "⭐", w: 3 },
-      { e: "💎", w: 1 }, { e: "7️⃣", w: 1 },
-    ];
-    const totalW = symbols.reduce((s, x) => s + x.w, 0);
-    function spin() {
-      let r = Math.random() * totalW;
-      for (const s of symbols) { r -= s.w; if (r <= 0) return s.e; }
-      return symbols[0].e;
-    }
-    const reels = [spin(), spin(), spin()];
-    const line = reels.join(" | ");
-    const bal = getBalance(message.author.id);
-    let result, delta;
-    if (reels[0] === reels[1] && reels[1] === reels[2]) {
-      const mult = reels[0] === "💎" ? 20 : reels[0] === "7️⃣" ? 10 : reels[0] === "⭐" ? 5 : reels[0] === "🔔" ? 4 : 3;
-      delta = bet * mult - bet;
-      setBalance(message.author.id, bal + delta);
-      result = `🎉 üçlü! x${mult} → +${delta} 🪙`;
-    } else if (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]) {
-      delta = 0;
-      result = `ikili — para iade`;
-    } else {
-      delta = -bet;
-      setBalance(message.author.id, bal - bet);
-      result = `-${bet} 🪙`;
-    }
-    await message.reply(`[ ${line} ]\n${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
-    return;
-  }
-
-  if (lower === "*kasa" || lower === "*kasalar") {
-    const lines = Object.entries(CASES).map(([key, c]) => {
-      return `**${c.name}** (\`*kasa ${key}\`) — ${c.cost} 🪙`;
-    });
-    await message.reply(`**CS2 Kasaları:**\n${lines.join("\n")}\n\nNadirlik şansları: ⬜ Consumer %79.9 | 🟦 Industrial %16.0 | 🟪 Mil-Spec %3.2 | 🔵 Restricted %0.64 | 🩷 Classified %0.26 | 🔴 Covert %0.064 | 🟡 Knife %0.026`);
-    return;
-  }
-
-  if (lower.startsWith("*kasa ")) {
-    const key = lower.slice(6).trim();
-    const caseData = CASES[key];
-    if (!caseData) {
-      await message.reply(`bilinmeyen kasa. kullanılabilir kasalar: ${Object.keys(CASES).join(", ")}`);
-      return;
-    }
-    const bal = getBalance(message.author.id);
-    if (bal < caseData.cost) {
-      await message.reply(`yetersiz bakiye! Bu kasa ${caseData.cost} 🪙 gerektiriyor. Bakiyen: ${bal} 🪙`);
-      return;
-    }
-    setBalance(message.author.id, bal - caseData.cost);
-
-    const rarity = rollRarity();
-    const skinPool = caseData.skins[rarity];
-    const skin = skinPool[Math.floor(Math.random() * skinPool.length)];
-    const condition = rollCondition();
-    const isStatTrak = ["milspec","restricted","classified","covert","knife"].includes(rarity) && Math.random() < 0.1;
-    const stPrefix = isStatTrak ? "StatTrak™ " : "";
-    const fullName = `${stPrefix}${skin} (${condition.short})`;
-
-    const info = RARITY_INFO[rarity];
-    const basePrice = SKIN_PRICES[skin];
-    let coinReward;
-    if (basePrice !== undefined) {
-      const condMult = CONDITION_COIN_MULT[condition.short] ?? 0.28;
-      coinReward = Math.max(info.coinMin, Math.round(basePrice * condMult * COIN_RATE));
-    } else {
-      coinReward = info.coinMin + Math.floor(Math.random() * (info.coinMax - info.coinMin + 1));
-    }
-    if (isStatTrak) coinReward = Math.floor(coinReward * 1.5);
-
-    const savesToInventory = ["restricted","classified","covert","knife"].includes(rarity);
-    setBalance(message.author.id, getBalance(message.author.id) + coinReward);
-    if (savesToInventory) {
-      addToInventory(message.author.id, message.author.username, {
-        name: fullName,
-        rarity,
-        case: caseData.name,
-        date: new Date().toISOString(),
-      });
-    }
-
-    const rarityLabel = `${info.color} ${info.label}`;
-    const stNote = isStatTrak ? " *(StatTrak™ +50%)*" : "";
-    const inventoryNote = savesToInventory
-      ? `\n📦 **Envantere eklendi!** +${coinReward} 🪙${stNote}`
-      : `\n+${coinReward} 🪙${stNote}`;
-    await message.reply(`🎰 **${caseData.name}** açıldı!\n\n${rarityLabel}\n🔫 **${fullName}**${inventoryNote}\n\nYeni bakiye: ${getBalance(message.author.id)} 🪙`);
-    return;
-  }
-
-  if (lower === "*envanter" || lower.startsWith("*envanter ")) {
-    let targetId = message.author.id;
-    let targetName = message.author.username;
-    if (message.mentions.users.size > 0) {
-      const mentioned = message.mentions.users.first();
-      targetId = mentioned.id;
-      targetName = mentioned.username;
-    }
-    const inv = inventory[targetId];
-    if (!inv || inv.items.length === 0) {
-      await message.reply(targetId === message.author.id ? "envanterin boş! kasa açarak nadir skinler kazanabilirsin." : `**${targetName}** kullanıcısının envanteri boş.`);
-      return;
-    }
-    const rarityOrder = ["knife","covert","classified","restricted","milspec"];
-    const sorted = [...inv.items].sort((a, b) => rarityOrder.indexOf(a.rarity) - rarityOrder.indexOf(b.rarity));
-    const lines = sorted.map((item, i) => {
-      const info = RARITY_INFO[item.rarity] || {};
-      return `${i + 1}. ${info.color || ""} ${item.name}`;
-    });
-    const chunks = [];
-    let chunk = [];
-    for (const line of lines) {
-      chunk.push(line);
-      if (chunk.length === 15) { chunks.push(chunk.join("\n")); chunk = []; }
-    }
-    if (chunk.length) chunks.push(chunk.join("\n"));
-    const header = `**${targetName}** envanteri (${sorted.length} item):`;
-    await message.reply(`${header}\n${chunks[0]}`);
-    for (let i = 1; i < chunks.length; i++) await message.channel.send(chunks[i]);
-    return;
-  }
-
-  if (lower.startsWith("*zar")) {
-    const parts = content.split(/\s+/);
-    const bet = parseBet(parts[1], message.author.id);
-    if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
-    const ur = Math.floor(Math.random() * 6) + 1;
-    const br = Math.floor(Math.random() * 6) + 1;
-    const bal = getBalance(message.author.id);
-    let result;
-    if (ur > br) { setBalance(message.author.id, bal + bet); result = `kazandın +${bet} 🪙`; }
-    else if (ur < br) { setBalance(message.author.id, bal - bet); result = `kaybettin -${bet} 🪙`; }
-    else result = "berabere, para iade";
-    await message.reply(`Sen: **${ur}** | Ben: **${br}** — ${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
-    return;
-  }
-
-  if (lower.startsWith("*tura")) {
-    const parts = content.split(/\s+/);
-    const bet = parseBet(parts[1], message.author.id);
-    const choice = parts[2]?.toLowerCase();
-    if (!bet || !["yazı", "tura", "yazi"].includes(choice)) {
-      await message.reply(`kullanım: *tura [miktar] yazı/tura | bakiyen: ${getBalance(message.author.id)} 🪙`);
-      return;
-    }
-    const result = Math.random() < 0.5 ? "yazı" : "tura";
-    const normalChoice = choice === "yazi" ? "yazı" : choice;
-    const bal = getBalance(message.author.id);
-    if (result === normalChoice) {
-      setBalance(message.author.id, bal + bet);
-      await message.reply(`**${result}** — kazandın +${bet} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
-    } else {
-      setBalance(message.author.id, bal - bet);
-      await message.reply(`**${result}** — kaybettin -${bet} 🪙 | Bakiye: ${getBalance(message.author.id)} 🪙`);
-    }
-    return;
-  }
-
-  if (lower.startsWith("*tkm") || lower.startsWith("*rps")) {
-    const parts = content.split(/\s+/);
-    const valid = ["tas", "kagit", "makas"];
-    const choice = foldTR(parts[2] || "");
-    if (!valid.includes(choice)) {
-      await message.reply(`kullanım: *tkm [miktar] taş/kağıt/makas | bakiyen: ${getBalance(message.author.id)} 🪙`);
-      return;
-    }
-    const bet = parseBet(parts[1], message.author.id);
-    if (!bet) { await message.reply(`geçersiz miktar. bakiyen: ${getBalance(message.author.id)} 🪙`); return; }
-    const names = { tas: "taş", kagit: "kağıt", makas: "makas" };
-    const beats = { tas: "makas", kagit: "tas", makas: "kagit" };
-    const options = ["tas", "kagit", "makas"];
-    const bot = options[Math.floor(Math.random() * 3)];
-    const bal = getBalance(message.author.id);
-    let result;
-    if (choice === bot) { result = "berabere, para iade"; }
-    else if (beats[choice] === bot) { setBalance(message.author.id, bal + bet); result = `kazandın +${bet} 🪙`; }
-    else { setBalance(message.author.id, bal - bet); result = `kaybettin -${bet} 🪙`; }
-    await message.reply(`Sen: **${names[choice]}** | Ben: **${names[bot]}** — ${result} | Bakiye: ${getBalance(message.author.id)} 🪙`);
-    return;
-  }
-
-  if (lower === "*roblox" || lower === "*oyun") {
-    const presence = await getRobloxPresence();
-    if (!presence) { await message.reply("bilgi alınamadı"); return; }
-    if (!presence.online) { await message.reply("şu an çevrimdışı"); return; }
-    if (presence.inGame) {
-      await message.reply(`oyunda: **${presence.gameName || "bilinmiyor"}**`);
-    } else {
-      await message.reply("çevrimiçi ama oyunda değil");
-    }
-    return;
-  }
-
   let isReplyToBot = false;
   if (message.reference?.messageId) {
     try {
@@ -1821,43 +1677,6 @@ client.on("messageCreate", async (message) => {
       await message.react(EMOJI_1);
       await message.react(EMOJI_2);
     } catch {}
-  }
-});
-
-/* =========================
-   BLACKJACK REAKSİYON
-========================= */
-client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
-  if (reaction.partial) { try { await reaction.fetch(); } catch { return; } }
-  if (reaction.message.partial) { try { await reaction.message.fetch(); } catch { return; } }
-
-  const game = [...bjGames.values()].find(g => g.messageId === reaction.message.id && g.userId === user.id);
-  if (!game) return;
-
-  const emoji = reaction.emoji.name;
-  if (emoji !== "⬆️" && emoji !== "🛑") return;
-
-  try { await reaction.users.remove(user.id); } catch {}
-
-  const msg = reaction.message;
-
-  if (emoji === "⬆️") {
-    game.playerHand.push(game.deck.pop());
-    if (bjHandVal(game.playerHand) > 21) {
-      bjGames.delete(game.userId);
-      setBalance(game.userId, getBalance(game.userId) - game.bet);
-      try { await msg.reactions.removeAll(); } catch {}
-      await msg.edit(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\nBUST! -${game.bet} 🪙 | Bakiye: ${getBalance(game.userId)} 🪙`);
-    } else {
-      await msg.edit(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand, true)}\nBahis: ${game.bet} 🪙 | ⬆️ kart çek • 🛑 dur`);
-    }
-  } else if (emoji === "🛑") {
-    bjDealerPlay(game);
-    const result = bjResolve(game);
-    bjGames.delete(game.userId);
-    try { await msg.reactions.removeAll(); } catch {}
-    await msg.edit(`Sen: ${bjShowHand(game.playerHand)}\nDealer: ${bjShowHand(game.dealerHand)}\n${result} | Bakiye: ${getBalance(game.userId)} 🪙`);
   }
 });
 
