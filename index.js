@@ -959,7 +959,7 @@ function ytdlpPipe(url, cookieArgs) {
     const ytdlp = spawn("yt-dlp", [
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
       "--no-playlist", "--extractor-args", "youtube:player_client=ios,web",
-      "--retries", "5", "--fragment-retries", "5", "--retry-sleep", "3",
+      "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "exp=1:30",
       ...cookieArgs, "-o", "-", url
     ]);
     const ffmpeg = spawn("ffmpeg", [
@@ -1935,14 +1935,13 @@ client.on("messageCreate", async (message) => {
     shouldRespond = true;
   }
 
-  // Bot'a reply → Gemini
+  // Bot'a reply → Markov
   if (isReplyToBot) {
-    const recentHistory = await fetchRecentHistory(message.channel, 8);
-    const out = await askGemini(`${message.author.username}: ${content}`, false, recentHistory);
-    if (out && !botRecentSet.has(out)) {
-      botRecentSet.add(out);
+    const markov = generateMarkov();
+    if (markov && !botRecentSet.has(markov)) {
+      botRecentSet.add(markov);
       if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
-      await message.reply(out);
+      await message.reply(markov);
     }
     return;
   }
