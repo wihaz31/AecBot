@@ -1126,20 +1126,24 @@ async function ytdlpCreateResource(url, title) {
       console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
     }
   }
-  // 3. yt-dlp pipe — Railway'de YouTube CDN erişilebilir olabilir
+  // 3. SoundCloud (datacenter IP kısıtlaması yok)
+  const scQuery = title || url;
+  console.log("[MÜZİK] SoundCloud:", scQuery.slice(0, 60));
+  try {
+    return await soundcloudStream(scQuery);
+  } catch (e) {
+    console.log("[MÜZİK] SoundCloud başarısız:", e.message?.slice(0, 80));
+  }
+  // 4. Son çare: yt-dlp pipe
   const cookieArgs = ytdlpCookieArgs();
   try {
     return await ytdlpPipe(url, cookieArgs);
   } catch (e) {
     if (cookieArgs.length > 0) {
-      console.log("[MÜZİK] Cookie'li deneme başarısız, retry:", e.message?.slice(0, 80));
       try { return await ytdlpPipe(url, []); } catch {}
     }
+    throw e;
   }
-  // 4. SoundCloud fallback (play-dl ile direkt stream, yt-dlp gerektirmez)
-  const scQuery = title || url;
-  console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
-  return await soundcloudStream(scQuery);
 }
 
 async function playNext(guildId) {
