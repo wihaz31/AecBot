@@ -23,6 +23,7 @@ const MAX_MEMORY_MESSAGES = 40000;
 
 let messageCounter = 0;
 let nextMessageTarget = Math.floor(Math.random() * 31) + 20;
+const guildCounters = new Map(); // sunucu başına counter
 
 const REPLY_RESPONSE_CHANCE = 1;
 const MENTION_RESPONSE_CHANCE = 1;
@@ -1922,46 +1923,37 @@ client.on("messageCreate", async (message) => {
       if (refMsg.author.id === client.user.id) isReplyToBot = true;
     } catch {}
   }
+  // Sunucu başına counter
+  const guildId = message.guildId;
+  if (!guildCounters.has(guildId)) guildCounters.set(guildId, { count: 0, target: Math.floor(Math.random() * 31) + 20 });
+  const gc = guildCounters.get(guildId);
   let shouldRespond = false;
-
-  messageCounter++;
-  if (messageCounter >= nextMessageTarget) {
-    messageCounter = 0;
-    nextMessageTarget = Math.floor(Math.random() * 31) + 20;
+  gc.count++;
+  if (gc.count >= gc.target) {
+    gc.count = 0;
+    gc.target = Math.floor(Math.random() * 31) + 20;
     shouldRespond = true;
   }
 
-  if (isReplyToBot || shouldRespond) {
+  // Bot'a reply → Gemini
+  if (isReplyToBot) {
     const recentHistory = await fetchRecentHistory(message.channel, 8);
-    const context = isReplyToBot
-      ? `${message.author.username}: ${content}`
-      : content;
-
-    const out = await askGemini(context, false, recentHistory);
-    if (out) {
-      if (!botRecentSet.has(out)) {
-        botRecentSet.add(out);
-        if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
-        if (isReplyToBot) {
-          await message.reply(out);
-        } else {
-          await message.channel.send(out);
-        }
-      }
-      return;
+    const out = await askGemini(`${message.author.username}: ${content}`, false, recentHistory);
+    if (out && !botRecentSet.has(out)) {
+      botRecentSet.add(out);
+      if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
+      await message.reply(out);
     }
+    return;
+  }
 
+  // Counter tetiklendi → tüm seed'den Markov
+  if (shouldRespond) {
     const markov = generateMarkov();
-    if (markov && markov.split(" ").length >= 5) {
-      if (!botRecentSet.has(markov)) {
-        botRecentSet.add(markov);
-        if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
-        if (isReplyToBot) {
-          await message.reply(markov);
-        } else {
-          await message.channel.send(markov);
-        }
-      }
+    if (markov && markov.split(" ").length >= 3 && !botRecentSet.has(markov)) {
+      botRecentSet.add(markov);
+      if (botRecentSet.size > BOT_RECENT_LIMIT) botRecentSet.delete(botRecentSet.values().next().value);
+      await message.channel.send(markov);
     }
   }
 
