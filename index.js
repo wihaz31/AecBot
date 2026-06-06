@@ -905,7 +905,7 @@ async function askGemini(prompt, useFile = false, recentHistory = "") {
 ========================= */
 const musicQueues = new Map();
 
-const YT_COOKIE_FILE = "/tmp/yt-cookies.txt";
+const YT_COOKIE_FILE = "/root/AecBot/yt-cookies.txt";
 if (process.env.YOUTUBE_COOKIE) {
   try {
     let content = process.env.YOUTUBE_COOKIE.replace(/\\n/g, "\n");
@@ -917,7 +917,7 @@ if (process.env.YOUTUBE_COOKIE) {
   } catch {}
 }
 function ytdlpCookieArgs() {
-  return process.env.YOUTUBE_COOKIE ? ["--cookies", YT_COOKIE_FILE] : [];
+  return fs.existsSync(YT_COOKIE_FILE) ? ["--cookies", YT_COOKIE_FILE] : [];
 }
 
 async function ytdlpGetInfo(url) {
