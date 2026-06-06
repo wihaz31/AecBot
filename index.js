@@ -954,37 +954,29 @@ async function ytdlpSearch(query) {
   });
 }
 
-function ytdlpPipe(url, cookieArgs) {
+function ytdlpGetUrl(url, cookieArgs) {
   return new Promise((resolve, reject) => {
     const ytdlp = spawn("yt-dlp", [
+      "--get-url",
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
-      "--no-playlist", "--extractor-args", "youtube:player_client=ios,web",
-      "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "exp=1:30",
-      ...cookieArgs, "-o", "-", url
+      "--no-playlist",
+      "--js-runtimes", "node",
+      ...cookieArgs, url
     ]);
-    const ffmpeg = spawn("ffmpeg", [
-      "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
-      "-loglevel", "warning", "pipe:1"
-    ]);
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-    let ytErr = "", resolved = false;
-    ytdlp.stderr.on("data", d => { ytErr += d; });
+    let out = "", err = "";
+    ytdlp.stdout.on("data", d => { out += d; });
+    ytdlp.stderr.on("data", d => { err += d; });
     ytdlp.on("close", code => {
-      if (code !== 0) {
-        console.log("[yt-dlp]", ytErr.slice(0, 300));
-        if (!resolved) { resolved = true; reject(new Error(ytErr.slice(0, 200))); }
+      const directUrl = out.trim().split("\n")[0];
+      if (code === 0 && directUrl.startsWith("http")) {
+        resolve(directUrl);
+      } else {
+        console.log("[yt-dlp]", err.slice(-300));
+        reject(new Error(err.slice(-200)));
       }
     });
-    ffmpeg.stderr.on("data", d => console.log("[ffmpeg]", d.toString().slice(0, 150)));
-    ffmpeg.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
-    ytdlp.on("error", err => { if (!resolved) { resolved = true; reject(err); } });
-    ffmpeg.stdout.once("readable", () => {
-      if (!resolved) { resolved = true; resolve(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw })); }
-    });
-    const timer = setTimeout(() => {
-      if (!resolved) { resolved = true; ytdlp.kill(); ffmpeg.kill(); reject(new Error("30s timeout")); }
-    }, 30000);
-    ffmpeg.stdout.on("close", () => clearTimeout(timer));
+    ytdlp.on("error", reject);
+    setTimeout(() => { ytdlp.kill(); reject(new Error("yt-dlp timeout")); }, 30000);
   });
 }
 
@@ -1126,24 +1118,28 @@ async function ytdlpCreateResource(url, title) {
       console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
     }
   }
-  // 3. SoundCloud (datacenter IP kısıtlaması yok)
-  const scQuery = title || url;
-  console.log("[MÜZİK] SoundCloud:", scQuery.slice(0, 60));
-  try {
-    return await soundcloudStream(scQuery);
-  } catch (e) {
-    console.log("[MÜZİK] SoundCloud başarısız:", e.message?.slice(0, 80));
-  }
-  // 4. Son çare: yt-dlp pipe
+  // 3. yt-dlp --get-url → ffmpeg
   const cookieArgs = ytdlpCookieArgs();
   try {
-    return await ytdlpPipe(url, cookieArgs);
+    const directUrl = await ytdlpGetUrl(url, cookieArgs);
+    console.log("[MÜZİK] yt-dlp URL alındı, ffmpeg başlatılıyor");
+    return await ffmpegFromUrl(directUrl);
   } catch (e) {
+    console.log("[MÜZİK] yt-dlp başarısız:", e.message?.slice(0, 80));
     if (cookieArgs.length > 0) {
-      try { return await ytdlpPipe(url, []); } catch {}
+      try {
+        const directUrl = await ytdlpGetUrl(url, []);
+        console.log("[MÜZİK] yt-dlp URL alındı (cookie'siz)");
+        return await ffmpegFromUrl(directUrl);
+      } catch (e2) {
+        console.log("[MÜZİK] yt-dlp cookie'siz de başarısız:", e2.message?.slice(0, 80));
+      }
     }
-    throw e;
   }
+  // 4. Son çare: SoundCloud
+  const scQuery = title || url;
+  console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
+  return await soundcloudStream(scQuery);
 }
 
 async function playNext(guildId) {
