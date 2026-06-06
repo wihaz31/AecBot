@@ -954,29 +954,46 @@ async function ytdlpSearch(query) {
   });
 }
 
-function ytdlpGetUrl(url, cookieArgs) {
+function ytdlpTempFile(url, cookieArgs) {
+  const tmpFile = `/tmp/aecbot_${Date.now()}.webm`;
   return new Promise((resolve, reject) => {
     const ytdlp = spawn("yt-dlp", [
-      "--get-url",
+      "--js-runtimes", "node",
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
       "--no-playlist",
-      "--js-runtimes", "node",
-      ...cookieArgs, url
+      ...cookieArgs,
+      "-o", tmpFile, url
     ]);
-    let out = "", err = "";
-    ytdlp.stdout.on("data", d => { out += d; });
+    let err = "";
     ytdlp.stderr.on("data", d => { err += d; });
-    ytdlp.on("close", code => {
-      const directUrl = out.trim().split("\n")[0];
-      if (code === 0 && directUrl.startsWith("http")) {
-        resolve(directUrl);
-      } else {
-        console.log("[yt-dlp]", err.slice(-300));
-        reject(new Error(err.slice(-200)));
-      }
-    });
     ytdlp.on("error", reject);
-    setTimeout(() => { ytdlp.kill(); reject(new Error("yt-dlp timeout")); }, 30000);
+    const dlTimer = setTimeout(() => { ytdlp.kill(); reject(new Error("yt-dlp download timeout")); }, 120000);
+    ytdlp.on("close", code => {
+      clearTimeout(dlTimer);
+      if (code !== 0) {
+        fs.unlink(tmpFile, () => {});
+        console.log("[yt-dlp]", err.slice(-300));
+        return reject(new Error(err.slice(-200)));
+      }
+      const ffmpeg = spawn("ffmpeg", [
+        "-i", tmpFile, "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2",
+        "-loglevel", "warning", "pipe:1"
+      ]);
+      let resolved = false;
+      ffmpeg.stderr.on("data", d => console.log("[ffmpeg]", d.toString().slice(0, 150)));
+      ffmpeg.on("error", e => { if (!resolved) { resolved = true; fs.unlink(tmpFile, () => {}); reject(e); } });
+      ffmpeg.stdout.once("readable", () => {
+        if (!resolved) {
+          resolved = true;
+          const resource = createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw });
+          ffmpeg.on("close", () => fs.unlink(tmpFile, () => {}));
+          resolve(resource);
+        }
+      });
+      setTimeout(() => {
+        if (!resolved) { resolved = true; ffmpeg.kill(); fs.unlink(tmpFile, () => {}); reject(new Error("ffmpeg timeout")); }
+      }, 15000);
+    });
   });
 }
 
@@ -1118,19 +1135,15 @@ async function ytdlpCreateResource(url, title) {
       console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
     }
   }
-  // 3. yt-dlp --get-url → ffmpeg
+  // 3. yt-dlp temp dosya → ffmpeg
   const cookieArgs = ytdlpCookieArgs();
   try {
-    const directUrl = await ytdlpGetUrl(url, cookieArgs);
-    console.log("[MÜZİK] yt-dlp URL alındı, ffmpeg başlatılıyor");
-    return await ffmpegFromUrl(directUrl);
+    return await ytdlpTempFile(url, cookieArgs);
   } catch (e) {
     console.log("[MÜZİK] yt-dlp başarısız:", e.message?.slice(0, 80));
     if (cookieArgs.length > 0) {
       try {
-        const directUrl = await ytdlpGetUrl(url, []);
-        console.log("[MÜZİK] yt-dlp URL alındı (cookie'siz)");
-        return await ffmpegFromUrl(directUrl);
+        return await ytdlpTempFile(url, []);
       } catch (e2) {
         console.log("[MÜZİK] yt-dlp cookie'siz de başarısız:", e2.message?.slice(0, 80));
       }
