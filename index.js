@@ -960,6 +960,7 @@ function ytdlpPipe(url, cookieArgs) {
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
       "--no-playlist", "--extractor-args", "youtube:player_client=ios,web",
       "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "exp=1:30",
+      "--js-runtimes", "node",
       ...cookieArgs, "-o", "-", url
     ]);
     const ffmpeg = spawn("ffmpeg", [
@@ -1126,24 +1127,22 @@ async function ytdlpCreateResource(url, title) {
       console.log("[MÜZİK] Piped stream başarısız:", e.message?.slice(0, 80));
     }
   }
-  // 3. SoundCloud (datacenter IP kısıtlaması yok)
-  const scQuery = title || url;
-  console.log("[MÜZİK] SoundCloud:", scQuery.slice(0, 60));
-  try {
-    return await soundcloudStream(scQuery);
-  } catch (e) {
-    console.log("[MÜZİK] SoundCloud başarısız:", e.message?.slice(0, 80));
-  }
-  // 4. Son çare: yt-dlp pipe
+  // 3. yt-dlp pipe
   const cookieArgs = ytdlpCookieArgs();
   try {
     return await ytdlpPipe(url, cookieArgs);
   } catch (e) {
+    console.log("[MÜZİK] yt-dlp başarısız:", e.message?.slice(0, 80));
     if (cookieArgs.length > 0) {
-      try { return await ytdlpPipe(url, []); } catch {}
+      try { return await ytdlpPipe(url, []); } catch (e2) {
+        console.log("[MÜZİK] yt-dlp (cookie'siz) başarısız:", e2.message?.slice(0, 80));
+      }
     }
-    throw e;
   }
+  // 4. Son çare: SoundCloud
+  const scQuery = title || url;
+  console.log("[MÜZİK] SoundCloud fallback:", scQuery.slice(0, 60));
+  return await soundcloudStream(scQuery);
 }
 
 async function playNext(guildId) {
