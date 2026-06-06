@@ -958,7 +958,7 @@ function ytdlpPipe(url, cookieArgs) {
   return new Promise((resolve, reject) => {
     const ytdlp = spawn("yt-dlp", [
       "-f", "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio",
-      "--no-playlist", "--extractor-args", "youtube:player_client=ios,web",
+      "--no-playlist",
       "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "exp=1:30",
       "--js-runtimes", "node",
       ...cookieArgs, "-o", "-", url
