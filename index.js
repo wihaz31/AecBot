@@ -887,7 +887,11 @@ async function askGemini(prompt, useFile = false, recentHistory = "") {
       },
       15000
     );
-    if (!r.ok) return null;
+    if (!r.ok) {
+      const errText = await r.text().catch(() => "");
+      console.log("[GEMİNİ] API hatası:", r.status, errText.slice(0, 200));
+      return null;
+    }
     const data = await r.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!text) return null;
@@ -895,7 +899,8 @@ async function askGemini(prompt, useFile = false, recentHistory = "") {
     if (containsReligiousAbuse(cleaned)) return null;
     if (!cleaned) return null;
     return cleaned;
-  } catch {
+  } catch (e) {
+    console.log("[GEMİNİ] catch hatası:", e.message);
     return null;
   }
 }
