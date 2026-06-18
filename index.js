@@ -5,7 +5,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const { URL } = require("url");
-const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const playdl = require("play-dl");
 const { spawn } = require("child_process");
@@ -20,6 +20,9 @@ const SEED_DAYS = 1500;
 const SEED_MAX = 150000;
 
 const MAX_MEMORY_MESSAGES = 40000;
+
+// Seed'i Redis'e kaydetme limiti (Upstash free request limiti ~1MB)
+const SEED_REDIS_LIMIT_BYTES = 900 * 1024;
 
 let messageCounter = 0;
 let nextMessageTarget = Math.floor(Math.random() * 31) + 20;
@@ -156,6 +159,66 @@ async function redisSet(key, value) {
       body: JSON.stringify(["SET", key, JSON.stringify(value)]),
     }, 5000);
   } catch {}
+}
+
+/* =========================
+   SUNUCU AYARLARI (kanal config)
+========================= */
+// guildConfig: { guildId: { sohbetChannelId, seedChannelId } }
+let guildConfig = {};
+let seedChannelIds = new Set([SEED_CHANNEL_ID]);
+
+function rebuildSeedChannelIds() {
+  const s = new Set(Object.values(guildConfig).map((c) => c.seedChannelId).filter(Boolean));
+  if (s.size === 0) s.add(SEED_CHANNEL_ID); // geriye dönük uyumluluk
+  seedChannelIds = s;
+}
+
+let guildConfigSaveTimer = null;
+function saveGuildConfig() {
+  rebuildSeedChannelIds();
+  if (guildConfigSaveTimer) clearTimeout(guildConfigSaveTimer);
+  guildConfigSaveTimer = setTimeout(() => redisSet("guildConfig", guildConfig), 2000);
+}
+
+function getSohbetChannelId(guildId) {
+  return guildConfig[guildId]?.sohbetChannelId || null;
+}
+
+/* =========================
+   SEED REDIS CACHE
+========================= */
+let seedSaveTimer = null;
+function saveSeedMemory() {
+  if (!UPSTASH_URL) return;
+  if (seedSaveTimer) return; // zaten planlı, ilk yazımdan 10sn sonra kaydeder
+  seedSaveTimer = setTimeout(async () => {
+    seedSaveTimer = null;
+    try {
+      let arr = memory;
+      let json = JSON.stringify(arr);
+      // Limiti aşarsa en eski mesajları düşürerek sığdır
+      if (Buffer.byteLength(json, "utf8") > SEED_REDIS_LIMIT_BYTES) {
+        let lo = 0, hi = arr.length;
+        while (lo < hi) {
+          const mid = Math.floor((lo + hi) / 2);
+          const slice = arr.slice(mid);
+          if (Buffer.byteLength(JSON.stringify(slice), "utf8") <= SEED_REDIS_LIMIT_BYTES) hi = mid;
+          else lo = mid + 1;
+        }
+        arr = arr.slice(lo);
+        json = JSON.stringify(arr);
+        if (Buffer.byteLength(json, "utf8") > SEED_REDIS_LIMIT_BYTES) {
+          console.log("[SEED] Redis limiti aşıldı, kaydedilmedi");
+          return;
+        }
+      }
+      await redisSet("seedMemory", arr);
+      console.log(`[SEED] Redis'e kaydedildi: ${arr.length} mesaj (${Math.round(Buffer.byteLength(json, "utf8") / 1024)}KB)`);
+    } catch (e) {
+      console.log("[SEED] Redis kayıt hatası:", e.message?.slice(0, 80));
+    }
+  }, 10000);
 }
 
 /* =========================
@@ -845,11 +908,18 @@ function trDayMonth(offsetDays = 0) {
   return { key: `${pad2(tr.getDate())}-${pad2(tr.getMonth() + 1)}`, year: tr.getFullYear() };
 }
 
-// Bir guild'de mesaj gönderilebilecek ilk metin kanalını bulur
+// Bir guild için kutlama/sohbet kanalını döndürür (config -> system -> ilk uygun kanal)
 async function findAnnounceChannel(guildId) {
   try {
     const guild = await client.guilds.fetch(guildId);
     const me = guild.members.me || (await guild.members.fetchMe());
+    const configuredId = getSohbetChannelId(guildId);
+    if (configuredId) {
+      try {
+        const ch = await guild.channels.fetch(configuredId);
+        if (ch?.isTextBased?.() && ch.permissionsFor(me)?.has("SendMessages")) return ch;
+      } catch {}
+    }
     if (guild.systemChannel?.permissionsFor(me)?.has("SendMessages")) return guild.systemChannel;
     const channels = await guild.channels.fetch();
     for (const ch of channels.values()) {
@@ -871,21 +941,18 @@ async function checkBirthdays() {
 
   const entries = Object.entries(birthdays);
 
-  // 1. Yarın doğum günü olanlar -> diğer kayıtlı kullanıcılara DM hatırlatma
+  // 1. Yarın doğum günü olanlar -> sohbet kanalına hatırlatma
   const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
   for (const [uid, info] of tomorrowPeople) {
-    const name = info.name || "biri";
-    for (const [otherId] of entries) {
-      if (otherId === uid) continue;
+    const channel = await findAnnounceChannel(info.guildId);
+    if (channel) {
       try {
-        const user = await client.users.fetch(otherId);
-        await user.send(`🎂 Hatırlatma: **Yarın ${name}'in doğum günü!** Kutlamayı unutma 🎉`);
+        await channel.send(`🎂 Hatırlatma: **Yarın <@${uid}>'in doğum günü!** Kutlamayı unutmayın 🎉`);
       } catch {}
-      await sleep(300);
     }
   }
 
-  // 2. Bugün doğum günü olanlar -> kutlama mesajı
+  // 2. Bugün doğum günü olanlar -> sohbet kanalına kutlama
   const todayPeople = entries.filter(([, b]) => b.date === today.key);
   for (const [uid, info] of todayPeople) {
     const channel = await findAnnounceChannel(info.guildId);
@@ -1334,12 +1401,39 @@ const SLASH_COMMANDS = [
     options: [
       {
         name: 'ekle',
-        description: 'Doğum gününü kaydet',
+        description: 'Doğum günü kaydet',
         type: ApplicationCommandOptionType.Subcommand,
-        options: [{ name: 'tarih', description: 'Gün.Ay (örn: 12.05)', type: ApplicationCommandOptionType.String, required: true }],
+        options: [
+          { name: 'tarih', description: 'Gün.Ay (örn: 12.05)', type: ApplicationCommandOptionType.String, required: true },
+          { name: 'kişi', description: 'Kimin doğum günü (boş = kendin)', type: ApplicationCommandOptionType.User, required: false },
+        ],
       },
-      { name: 'sil', description: 'Doğum gününü kaldır', type: ApplicationCommandOptionType.Subcommand },
+      {
+        name: 'sil',
+        description: 'Doğum günü kaldır',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'kişi', description: 'Kimin (boş = kendin)', type: ApplicationCommandOptionType.User, required: false }],
+      },
       { name: 'liste', description: 'Kayıtlı doğum günleri', type: ApplicationCommandOptionType.Subcommand },
+    ],
+  },
+  {
+    name: 'ayar',
+    description: 'Sunucu kanal ayarları (yönetici)',
+    options: [
+      {
+        name: 'sohbet',
+        description: 'Kutlama/sohbet kanalını ayarla',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true }],
+      },
+      {
+        name: 'seed',
+        description: 'Öğrenme (seed) kanalını ayarla',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true }],
+      },
+      { name: 'göster', description: 'Mevcut ayarları göster', type: ApplicationCommandOptionType.Subcommand },
     ],
   },
   { name: 'yardım', description: 'Komut listesi' },
@@ -1382,12 +1476,19 @@ client.once("ready", async () => {
   setInterval(checkBirthdays, 60 * 60 * 1000);
   setTimeout(checkBirthdays, 10 * 1000);
 
-  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun] = await Promise.all([
+  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun, savedGuildConfig, savedSeed] = await Promise.all([
     redisGet("economy"),
     redisGet("inventory"),
     redisGet("birthdays"),
     redisGet("birthdayLastRun"),
+    redisGet("guildConfig"),
+    redisGet("seedMemory"),
   ]);
+  if (savedGuildConfig) {
+    guildConfig = savedGuildConfig;
+    rebuildSeedChannelIds();
+    console.log(`[AYAR] ${Object.keys(guildConfig).length} sunucu ayarı yüklendi`);
+  }
   if (savedBirthdays) {
     birthdays = savedBirthdays;
     console.log(`[DOĞUMGÜNÜ] ${Object.keys(birthdays).length} kayıt yüklendi`);
@@ -1404,66 +1505,90 @@ client.once("ready", async () => {
     console.log(`[ENVANTER] Redis'ten yüklendi`);
   }
 
-  try {
-    const channel = await client.channels.fetch(SEED_CHANNEL_ID);
-    if (channel?.isTextBased()) {
-      console.log(`[SEED] ${channel.name} kanalından mesajlar yükleniyor...`);
-      let lastId = null;
-      let fetched = 0;
+  // Seed Redis cache'inde varsa Discord'dan çekme, hızlı başlat
+  if (savedSeed && Array.isArray(savedSeed) && savedSeed.length > 0) {
+    const rawMessages = [];
+    for (const entry of savedSeed) {
+      if (!memorySet.has(normalizeText(entry))) {
+        memory.push(entry);
+        memorySet.add(normalizeText(entry));
+      }
+      const idx = entry.indexOf(": ");
+      rawMessages.push(idx >= 0 ? entry.slice(idx + 2) : entry);
+    }
+    buildMarkov(rawMessages);
+    uploadMemoryToGemini();
+    seedState.running = false;
+    seedState.done = true;
+    console.log(`[SEED] Redis cache'inden yüklendi: ${memory.length} mesaj (Discord taraması atlandı)`);
+  } else {
+    try {
       const rawMessages = [];
-
       seedState.running = true;
-      seedState.channelName = channel.name;
       seedState.startedAt = Date.now();
-
       const cutoff = Date.now() - SEED_DAYS * 24 * 60 * 60 * 1000;
 
-      while (fetched < SEED_MAX) {
-        const opts = { limit: 100 };
-        if (lastId) opts.before = lastId;
-        let msgs;
+      const channelNames = [];
+      for (const channelId of seedChannelIds) {
+        let channel;
         try {
-          msgs = await channel.messages.fetch(opts);
-        } catch (e) {
-          seedState.error = e.message;
-          break;
-        }
-        if (msgs.size === 0) break;
-        let tooOld = false;
-        for (const m of msgs.values()) {
-          if (m.createdTimestamp < cutoff) { tooOld = true; break; }
-          if (!m.author.bot && m.content.length > 0 && m.content.length <= MAX_WORDS_PER_MESSAGE * 8) {
-            const txt = m.content.trim();
-            if (!containsReligiousAbuse(txt)) {
-              rawMessages.push(txt);
-              const entry = `${m.author.username}: ${txt}`;
-              if (!memorySet.has(normalizeText(entry))) {
-                memory.push(entry);
-                memorySet.add(normalizeText(entry));
+          channel = await client.channels.fetch(channelId);
+        } catch { continue; }
+        if (!channel?.isTextBased()) continue;
+        channelNames.push(channel.name);
+        console.log(`[SEED] ${channel.name} kanalından mesajlar yükleniyor...`);
+
+        let lastId = null;
+        let fetched = 0;
+        while (fetched < SEED_MAX) {
+          const opts = { limit: 100 };
+          if (lastId) opts.before = lastId;
+          let msgs;
+          try {
+            msgs = await channel.messages.fetch(opts);
+          } catch (e) {
+            seedState.error = e.message;
+            break;
+          }
+          if (msgs.size === 0) break;
+          let tooOld = false;
+          for (const m of msgs.values()) {
+            if (m.createdTimestamp < cutoff) { tooOld = true; break; }
+            if (!m.author.bot && m.content.length > 0 && m.content.length <= MAX_WORDS_PER_MESSAGE * 8) {
+              const txt = m.content.trim();
+              if (!containsReligiousAbuse(txt)) {
+                rawMessages.push(txt);
+                const entry = `${m.author.username}: ${txt}`;
+                if (!memorySet.has(normalizeText(entry))) {
+                  memory.push(entry);
+                  memorySet.add(normalizeText(entry));
+                }
               }
             }
           }
+          fetched += msgs.size;
+          seedState.collected = rawMessages.length;
+          seedState.fetchCount = fetched;
+          seedState.lastUpdateAt = Date.now();
+          lastId = msgs.last()?.id;
+          if (tooOld) break;
+          await sleep(120);
         }
-        fetched += msgs.size;
-        seedState.collected = rawMessages.length;
-        seedState.fetchCount = fetched;
-        seedState.lastUpdateAt = Date.now();
-        lastId = msgs.last()?.id;
-        if (tooOld) break;
-        await sleep(120);
       }
 
+      seedState.channelName = channelNames.join(", ");
       buildMarkov(rawMessages);
       if (memory.length > MAX_MEMORY_MESSAGES) memory.splice(0, memory.length - MAX_MEMORY_MESSAGES);
       uploadMemoryToGemini();
+      saveSeedMemory();
       seedState.running = false;
       seedState.done = true;
       console.log(`[SEED] Tamamlandı: ${rawMessages.length} mesaj, ${memory.length} hafıza`);
+    } catch (e) {
+      seedState.running = false;
+      seedState.error = e.message;
+      console.error("[SEED] Hata:", e.message);
     }
-  } catch (e) {
-    seedState.running = false;
-    seedState.error = e.message;
-    console.error("[SEED] Hata:", e.message);
   }
 });
 
@@ -1905,22 +2030,25 @@ client.on('interactionCreate', async (interaction) => {
       const raw = interaction.options.getString('tarih');
       const date = parseBirthday(raw);
       if (!date) { await interaction.reply({ content: 'Geçersiz tarih. Örnek: `12.05`', flags: 64 }); return; }
-      birthdays[interaction.user.id] = {
+      const target = interaction.options.getUser('kişi') || interaction.user;
+      birthdays[target.id] = {
         date,
-        name: interaction.user.username,
+        name: target.username,
         guildId: interaction.guildId,
       };
       saveBirthdays();
-      await interaction.reply({ content: `🎂 Doğum günün kaydedildi: **${formatBirthday(date)}**`, flags: 64 });
+      const who = target.id === interaction.user.id ? 'Senin doğum günün' : `<@${target.id}> için doğum günü`;
+      await interaction.reply({ content: `🎂 ${who} kaydedildi: **${formatBirthday(date)}**`, allowedMentions: { parse: [] } });
       return;
     }
     if (sub === 'sil') {
-      if (birthdays[interaction.user.id]) {
-        delete birthdays[interaction.user.id];
+      const target = interaction.options.getUser('kişi') || interaction.user;
+      if (birthdays[target.id]) {
+        delete birthdays[target.id];
         saveBirthdays();
-        await interaction.reply({ content: 'Doğum günün silindi.', flags: 64 });
+        await interaction.reply({ content: 'Doğum günü silindi.', flags: 64 });
       } else {
-        await interaction.reply({ content: 'Kayıtlı doğum günün yok.', flags: 64 });
+        await interaction.reply({ content: 'Kayıtlı doğum günü yok.', flags: 64 });
       }
       return;
     }
@@ -1930,6 +2058,32 @@ client.on('interactionCreate', async (interaction) => {
         .map(([uid, b]) => `• ${formatBirthday(b.date)} — <@${uid}>`);
       if (list.length === 0) { await interaction.reply('Henüz kayıtlı doğum günü yok.'); return; }
       await interaction.reply({ content: `🎂 **Doğum Günleri**\n${list.join('\n')}`, allowedMentions: { parse: [] } });
+      return;
+    }
+    return;
+  }
+
+  if (cmd === 'ayar') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'Bu komut için "Sunucuyu Yönet" yetkisi gerekir.', flags: 64 });
+      return;
+    }
+    const sub = interaction.options.getSubcommand();
+    if (sub === 'sohbet' || sub === 'seed') {
+      const channel = interaction.options.getChannel('kanal');
+      if (!channel?.isTextBased?.()) { await interaction.reply({ content: 'Metin kanalı seç.', flags: 64 }); return; }
+      if (!guildConfig[interaction.guildId]) guildConfig[interaction.guildId] = {};
+      if (sub === 'sohbet') guildConfig[interaction.guildId].sohbetChannelId = channel.id;
+      else guildConfig[interaction.guildId].seedChannelId = channel.id;
+      saveGuildConfig();
+      await interaction.reply({ content: `✅ ${sub === 'sohbet' ? 'Sohbet/kutlama' : 'Öğrenme (seed)'} kanalı <#${channel.id}> olarak ayarlandı.`, flags: 64 });
+      return;
+    }
+    if (sub === 'göster') {
+      const cfg = guildConfig[interaction.guildId] || {};
+      const sohbet = cfg.sohbetChannelId ? `<#${cfg.sohbetChannelId}>` : '_ayarlanmamış_';
+      const seed = cfg.seedChannelId ? `<#${cfg.seedChannelId}>` : '_ayarlanmamış_';
+      await interaction.reply({ content: `**Sunucu Ayarları**\nSohbet/kutlama: ${sohbet}\nÖğrenme (seed): ${seed}`, flags: 64 });
       return;
     }
     return;
@@ -1947,6 +2101,7 @@ client.on('interactionCreate', async (interaction) => {
       '`/doğumgünü` — doğum günü ekle/sil/liste',
       '`/kasalar` / `/kasa` / `/envanter` — CS2',
       '`/hafıza` / `/gökhan` / `/roblox` — diğer',
+      '`/ayar` — sohbet/seed kanalı ayarla (yönetici)',
     ].join('\n'));
     return;
   }
@@ -2028,7 +2183,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  if (message.channel.id === SEED_CHANNEL_ID && content.length > 0) {
+  if (seedChannelIds.has(message.channel.id) && content.length > 0) {
     if (!containsReligiousAbuse(content)) {
       const username = message.author.username || "biri";
       const entry = `${username}: ${content}`;
@@ -2044,6 +2199,7 @@ client.on("messageCreate", async (message) => {
           memorySet.delete(normalizeText(removed));
         }
       }
+      saveSeedMemory();
     }
   }
 
