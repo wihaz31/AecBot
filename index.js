@@ -5,7 +5,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const { URL } = require("url");
-const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType } = require("discord.js");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const playdl = require("play-dl");
 const { spawn } = require("child_process");
@@ -1425,13 +1425,13 @@ const SLASH_COMMANDS = [
         name: 'sohbet',
         description: 'Kutlama/sohbet kanalını ayarla',
         type: ApplicationCommandOptionType.Subcommand,
-        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true }],
+        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true, channelTypes: [ChannelType.GuildText] }],
       },
       {
         name: 'seed',
         description: 'Öğrenme (seed) kanalını ayarla',
         type: ApplicationCommandOptionType.Subcommand,
-        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true }],
+        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true, channelTypes: [ChannelType.GuildText] }],
       },
       { name: 'göster', description: 'Mevcut ayarları göster', type: ApplicationCommandOptionType.Subcommand },
     ],
