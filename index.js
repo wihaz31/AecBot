@@ -803,6 +803,101 @@ async function getRobloxPresence() {
 }
 
 /* =========================
+   DOĞUM GÜNÜ
+========================= */
+// birthdays: { userId: { date: "GG-AA", name, guildId } }
+let birthdays = {};
+let birthdayLastRun = null;
+
+let birthdaySaveTimer = null;
+function saveBirthdays() {
+  if (birthdaySaveTimer) clearTimeout(birthdaySaveTimer);
+  birthdaySaveTimer = setTimeout(() => {
+    redisSet("birthdays", birthdays);
+  }, 2000);
+}
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+// "12.05", "12/5", "12-05", "12 5" -> "12-05" (gün-ay), geçersizse null
+function parseBirthday(str) {
+  if (!str) return null;
+  const m = str.trim().match(/^(\d{1,2})\s*[.\/\-\s]\s*(\d{1,2})$/);
+  if (!m) return null;
+  const day = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  if (month < 1 || month > 12) return null;
+  const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (day < 1 || day > daysInMonth[month - 1]) return null;
+  return `${pad2(day)}-${pad2(month)}`;
+}
+
+function formatBirthday(date) {
+  const [d, mo] = date.split("-");
+  return `${d}.${mo}`;
+}
+
+// Türkiye saatine göre gün-ay döndürür
+function trDayMonth(offsetDays = 0) {
+  const now = new Date();
+  const tr = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+  tr.setDate(tr.getDate() + offsetDays);
+  return { key: `${pad2(tr.getDate())}-${pad2(tr.getMonth() + 1)}`, year: tr.getFullYear() };
+}
+
+// Bir guild'de mesaj gönderilebilecek ilk metin kanalını bulur
+async function findAnnounceChannel(guildId) {
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const me = guild.members.me || (await guild.members.fetchMe());
+    if (guild.systemChannel?.permissionsFor(me)?.has("SendMessages")) return guild.systemChannel;
+    const channels = await guild.channels.fetch();
+    for (const ch of channels.values()) {
+      if (ch?.isTextBased?.() && ch.permissionsFor(me)?.has("SendMessages")) return ch;
+    }
+  } catch {}
+  return null;
+}
+
+async function checkBirthdays() {
+  if (Object.keys(birthdays).length === 0) return;
+
+  const today = trDayMonth(0);
+  const tomorrow = trDayMonth(1);
+  const dayKey = `${today.year}-${today.key}`;
+  if (birthdayLastRun === dayKey) return; // bugün zaten çalıştı
+  birthdayLastRun = dayKey;
+  redisSet("birthdayLastRun", dayKey);
+
+  const entries = Object.entries(birthdays);
+
+  // 1. Yarın doğum günü olanlar -> diğer kayıtlı kullanıcılara DM hatırlatma
+  const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
+  for (const [uid, info] of tomorrowPeople) {
+    const name = info.name || "biri";
+    for (const [otherId] of entries) {
+      if (otherId === uid) continue;
+      try {
+        const user = await client.users.fetch(otherId);
+        await user.send(`🎂 Hatırlatma: **Yarın ${name}'in doğum günü!** Kutlamayı unutma 🎉`);
+      } catch {}
+      await sleep(300);
+    }
+  }
+
+  // 2. Bugün doğum günü olanlar -> kutlama mesajı
+  const todayPeople = entries.filter(([, b]) => b.date === today.key);
+  for (const [uid, info] of todayPeople) {
+    const channel = await findAnnounceChannel(info.guildId);
+    if (channel) {
+      try {
+        await channel.send(`🎉🎂 İyi ki doğdun <@${uid}>! Mutlu yıllar! 🥳🎈`);
+      } catch {}
+    }
+  }
+}
+
+/* =========================
    KİCK BİLDİRİMİ
 ========================= */
 let kickWasLive = false;
@@ -1233,6 +1328,20 @@ const SLASH_COMMANDS = [
   { name: 'hafıza', description: 'Eski bir mesajı hatırla' },
   { name: 'gökhan', description: "Gökhan Roblox'ta mı?" },
   { name: 'roblox', description: 'Roblox oyun durumu' },
+  {
+    name: 'doğumgünü',
+    description: 'Doğum günü işlemleri',
+    options: [
+      {
+        name: 'ekle',
+        description: 'Doğum gününü kaydet',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'tarih', description: 'Gün.Ay (örn: 12.05)', type: ApplicationCommandOptionType.String, required: true }],
+      },
+      { name: 'sil', description: 'Doğum gününü kaldır', type: ApplicationCommandOptionType.Subcommand },
+      { name: 'liste', description: 'Kayıtlı doğum günleri', type: ApplicationCommandOptionType.Subcommand },
+    ],
+  },
   { name: 'yardım', description: 'Komut listesi' },
 ];
 
@@ -1269,10 +1378,21 @@ client.once("ready", async () => {
     console.log('[BOT] SoundCloud client_id alınamadı:', e.message?.slice(0, 60));
   }
 
-  const [savedEconomy, savedInventory] = await Promise.all([
+  // Doğum günü kontrolü (her saat başı; içeride günde 1 kez çalışır)
+  setInterval(checkBirthdays, 60 * 60 * 1000);
+  setTimeout(checkBirthdays, 10 * 1000);
+
+  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun] = await Promise.all([
     redisGet("economy"),
     redisGet("inventory"),
+    redisGet("birthdays"),
+    redisGet("birthdayLastRun"),
   ]);
+  if (savedBirthdays) {
+    birthdays = savedBirthdays;
+    console.log(`[DOĞUMGÜNÜ] ${Object.keys(birthdays).length} kayıt yüklendi`);
+  }
+  if (savedBdayRun) birthdayLastRun = savedBdayRun;
   if (savedEconomy) {
     for (const [k, v] of Object.entries(savedEconomy)) balances.set(k, Number(v));
     console.log(`[EKONOMİ] ${balances.size} kullanıcı Redis'ten yüklendi`);
@@ -1779,6 +1899,42 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  if (cmd === 'doğumgünü') {
+    const sub = interaction.options.getSubcommand();
+    if (sub === 'ekle') {
+      const raw = interaction.options.getString('tarih');
+      const date = parseBirthday(raw);
+      if (!date) { await interaction.reply({ content: 'Geçersiz tarih. Örnek: `12.05`', flags: 64 }); return; }
+      birthdays[interaction.user.id] = {
+        date,
+        name: interaction.user.username,
+        guildId: interaction.guildId,
+      };
+      saveBirthdays();
+      await interaction.reply({ content: `🎂 Doğum günün kaydedildi: **${formatBirthday(date)}**`, flags: 64 });
+      return;
+    }
+    if (sub === 'sil') {
+      if (birthdays[interaction.user.id]) {
+        delete birthdays[interaction.user.id];
+        saveBirthdays();
+        await interaction.reply({ content: 'Doğum günün silindi.', flags: 64 });
+      } else {
+        await interaction.reply({ content: 'Kayıtlı doğum günün yok.', flags: 64 });
+      }
+      return;
+    }
+    if (sub === 'liste') {
+      const list = Object.entries(birthdays)
+        .sort((a, b) => a[1].date.localeCompare(b[1].date))
+        .map(([uid, b]) => `• ${formatBirthday(b.date)} — <@${uid}>`);
+      if (list.length === 0) { await interaction.reply('Henüz kayıtlı doğum günü yok.'); return; }
+      await interaction.reply({ content: `🎂 **Doğum Günleri**\n${list.join('\n')}`, allowedMentions: { parse: [] } });
+      return;
+    }
+    return;
+  }
+
   if (cmd === 'yardım') {
     await interaction.reply([
       '**komutlar:**',
@@ -1788,6 +1944,7 @@ client.on('interactionCreate', async (interaction) => {
       '`/ver` / `/sıralama` — ekonomi',
       '`/çal` / `/dur` / `/devam` / `/atla` / `/kuyruk` / `/çık` — müzik',
       '`/kelime` / `/kelimeson` / `/tahmin` — sözel oyunlar',
+      '`/doğumgünü` — doğum günü ekle/sil/liste',
       '`/kasalar` / `/kasa` / `/envanter` — CS2',
       '`/hafıza` / `/gökhan` / `/roblox` — diğer',
     ].join('\n'));
