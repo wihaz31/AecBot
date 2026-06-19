@@ -988,19 +988,12 @@ async function checkBirthdays() {
 
   const entries = Object.entries(birthdays);
 
-  // 1. Yarın doğum günü olanlar -> herkese DM (doğum günü sahibine ayrı mesaj)
+  // 1. Yarın doğum günü olanlar -> diğer kayıtlı kullanıcılara DM
   const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
   for (const [uid, info] of tomorrowPeople) {
     const name = info.name || "birinin";
-    // Doğum günü olan kişiye özel mesaj
-    try {
-      const birthdayUser = await client.users.fetch(uid);
-      await birthdayUser.send(`🎂 Yarın senin doğum günün! Kutlu olsun 🎉`);
-    } catch {}
-    await sleep(300);
-    // Diğer kayıtlı kişilere bildirim
     for (const [otherId] of entries) {
-      if (otherId === uid) continue;
+      if (otherId === uid) continue; // doğum günü olan kişiye atma
       try {
         const user = await client.users.fetch(otherId);
         await user.send(`🎂 Yarın **${name}**'in doğum günü! Kutlamayı unutma 🎉`);
