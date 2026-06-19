@@ -868,6 +868,19 @@ async function getRobloxPresence() {
 /* =========================
    DOĞUM GÜNÜ
 ========================= */
+// roleMenus: { messageId: { guildId, channelId, title, roles: [{emoji, roleId, roleName}] } }
+let roleMenus = {};
+let roleMenuSaveTimer = null;
+function saveRoleMenus() {
+  if (roleMenuSaveTimer) clearTimeout(roleMenuSaveTimer);
+  roleMenuSaveTimer = setTimeout(() => redisSet("roleMenus", roleMenus), 2000);
+}
+
+function buildRoleMenuContent(title, roles) {
+  const lines = roles.map(r => `${r.emoji} : ${r.roleName}`);
+  return `**Role Menu: ${title}**\nReact to give yourself a role.\n\n${lines.join('\n')}`;
+}
+
 // birthdays: { userId: { date: "GG-AA", name, guildId } }
 let birthdays = {};
 let birthdayLastRun = null;
@@ -1445,6 +1458,44 @@ const SLASH_COMMANDS = [
       { name: 'göster', description: 'Mevcut ayarları göster', type: ApplicationCommandOptionType.Subcommand },
     ],
   },
+  {
+    name: 'roller',
+    description: 'Rol menüsü sistemi (yönetici)',
+    defaultMemberPermissions: String(PermissionFlagsBits.ManageGuild),
+    options: [
+      {
+        name: 'oluştur',
+        description: 'Yeni rol menüsü oluştur',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'başlık', description: 'Menü başlığı (örn: roller)', type: ApplicationCommandOptionType.String, required: true }],
+      },
+      {
+        name: 'ekle',
+        description: 'Rol menüsüne emoji-rol çifti ekle',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [
+          { name: 'mesaj', description: 'Rol menüsü mesaj ID', type: ApplicationCommandOptionType.String, required: true },
+          { name: 'emoji', description: 'Emoji (Unicode veya sunucu emojisi)', type: ApplicationCommandOptionType.String, required: true },
+          { name: 'rol', description: 'Verilecek rol', type: ApplicationCommandOptionType.Role, required: true },
+        ],
+      },
+      {
+        name: 'çıkar',
+        description: 'Rol menüsünden emoji-rol çiftini kaldır',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [
+          { name: 'mesaj', description: 'Rol menüsü mesaj ID', type: ApplicationCommandOptionType.String, required: true },
+          { name: 'emoji', description: 'Kaldırılacak emoji', type: ApplicationCommandOptionType.String, required: true },
+        ],
+      },
+      {
+        name: 'sil',
+        description: 'Rol menüsünü tamamen sil',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'mesaj', description: 'Rol menüsü mesaj ID', type: ApplicationCommandOptionType.String, required: true }],
+      },
+    ],
+  },
   { name: 'yardım', description: 'Komut listesi' },
 ];
 
@@ -1485,13 +1536,14 @@ client.once("ready", async () => {
   setInterval(checkBirthdays, 60 * 60 * 1000);
   setTimeout(checkBirthdays, 10 * 1000);
 
-  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun, savedGuildConfig, savedSeed] = await Promise.all([
+  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun, savedGuildConfig, savedSeed, savedRoleMenus] = await Promise.all([
     redisGet("economy"),
     redisGet("inventory"),
     redisGet("birthdays"),
     redisGet("birthdayLastRun"),
     redisGet("guildConfig"),
     redisGet("seedMemory"),
+    redisGet("roleMenus"),
   ]);
   if (savedGuildConfig) {
     guildConfig = savedGuildConfig;
@@ -1503,6 +1555,10 @@ client.once("ready", async () => {
     console.log(`[DOĞUMGÜNÜ] ${Object.keys(birthdays).length} kayıt yüklendi`);
   }
   if (savedBdayRun) birthdayLastRun = savedBdayRun;
+  if (savedRoleMenus) {
+    roleMenus = savedRoleMenus;
+    console.log(`[ROLLER] ${Object.keys(roleMenus).length} rol menüsü yüklendi`);
+  }
   if (savedEconomy) {
     for (const [k, v] of Object.entries(savedEconomy)) balances.set(k, Number(v));
     console.log(`[EKONOMİ] ${balances.size} kullanıcı Redis'ten yüklendi`);
@@ -2109,6 +2165,81 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  if (cmd === 'roller') {
+    const sub = interaction.options.getSubcommand();
+    if (sub === 'oluştur') {
+      const title = interaction.options.getString('başlık');
+      const msg = await interaction.channel.send(`**Role Menu: ${title}**\nReact to give yourself a role.\n\n_Henüz rol eklenmedi. \`/roller ekle\` ile ekleyin._`);
+      roleMenus[msg.id] = { guildId: interaction.guildId, channelId: interaction.channelId, title, roles: [] };
+      saveRoleMenus();
+      await interaction.reply({ content: `Rol menüsü oluşturuldu! Mesaj ID: \`${msg.id}\`\nRol eklemek için: \`/roller ekle mesaj:${msg.id} emoji:🎮 rol:@RolAdı\``, flags: 64 });
+      return;
+    }
+    if (sub === 'ekle') {
+      const msgId = interaction.options.getString('mesaj');
+      const emoji = interaction.options.getString('emoji').trim();
+      const role = interaction.options.getRole('rol');
+      const menu = roleMenus[msgId];
+      if (!menu || menu.guildId !== interaction.guildId) {
+        await interaction.reply({ content: 'Bu ID\'ye ait bir rol menüsü bulunamadı.', flags: 64 }); return;
+      }
+      if (menu.roles.some(r => r.emoji === emoji)) {
+        await interaction.reply({ content: 'Bu emoji zaten menüde var.', flags: 64 }); return;
+      }
+      menu.roles.push({ emoji, roleId: role.id, roleName: role.name });
+      try {
+        const ch = await client.channels.fetch(menu.channelId);
+        const msg = await ch.messages.fetch(msgId);
+        await msg.edit(buildRoleMenuContent(menu.title, menu.roles));
+        await msg.react(emoji);
+      } catch (e) {
+        await interaction.reply({ content: `Mesaj güncellenemedi: ${e.message}`, flags: 64 }); return;
+      }
+      saveRoleMenus();
+      await interaction.reply({ content: `${emoji} → **${role.name}** eklendi.`, flags: 64 });
+      return;
+    }
+    if (sub === 'çıkar') {
+      const msgId = interaction.options.getString('mesaj');
+      const emoji = interaction.options.getString('emoji').trim();
+      const menu = roleMenus[msgId];
+      if (!menu || menu.guildId !== interaction.guildId) {
+        await interaction.reply({ content: 'Rol menüsü bulunamadı.', flags: 64 }); return;
+      }
+      const before = menu.roles.length;
+      menu.roles = menu.roles.filter(r => r.emoji !== emoji);
+      if (menu.roles.length === before) {
+        await interaction.reply({ content: 'Bu emoji menüde yok.', flags: 64 }); return;
+      }
+      try {
+        const ch = await client.channels.fetch(menu.channelId);
+        const msg = await ch.messages.fetch(msgId);
+        const content = menu.roles.length > 0 ? buildRoleMenuContent(menu.title, menu.roles) : `**Role Menu: ${menu.title}**\nReact to give yourself a role.\n\n_Henüz rol eklenmedi._`;
+        await msg.edit(content);
+      } catch {}
+      saveRoleMenus();
+      await interaction.reply({ content: `${emoji} menüden çıkarıldı.`, flags: 64 });
+      return;
+    }
+    if (sub === 'sil') {
+      const msgId = interaction.options.getString('mesaj');
+      const menu = roleMenus[msgId];
+      if (!menu || menu.guildId !== interaction.guildId) {
+        await interaction.reply({ content: 'Rol menüsü bulunamadı.', flags: 64 }); return;
+      }
+      try {
+        const ch = await client.channels.fetch(menu.channelId);
+        const msg = await ch.messages.fetch(msgId);
+        await msg.delete();
+      } catch {}
+      delete roleMenus[msgId];
+      saveRoleMenus();
+      await interaction.reply({ content: 'Rol menüsü silindi.', flags: 64 });
+      return;
+    }
+    return;
+  }
+
   if (cmd === 'yardım') {
     await interaction.reply([
       '**komutlar:**',
@@ -2122,10 +2253,33 @@ client.on('interactionCreate', async (interaction) => {
       '`/kasalar` / `/kasa` / `/envanter` — CS2',
       '`/hafıza` / `/gökhan` / `/roblox` — diğer',
       '`/ayar` — sohbet/seed kanalı ayarla (yönetici)',
+      '`/roller` — reaction rol menüsü oluştur/yönet (yönetici)',
     ].join('\n'));
     return;
   }
 });
+
+/* =========================
+   REACTION ROLE
+========================= */
+async function handleReactionRole(reaction, user, add) {
+  if (user.bot) return;
+  if (reaction.partial) { try { await reaction.fetch(); } catch { return; } }
+  const menu = roleMenus[reaction.message.id];
+  if (!menu) return;
+  const emoji = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
+  const entry = menu.roles.find(r => r.emoji === emoji);
+  if (!entry) return;
+  try {
+    const guild = await client.guilds.fetch(menu.guildId);
+    const member = await guild.members.fetch(user.id);
+    if (add) await member.roles.add(entry.roleId);
+    else await member.roles.remove(entry.roleId);
+  } catch {}
+}
+
+client.on('messageReactionAdd', (reaction, user) => handleReactionRole(reaction, user, true));
+client.on('messageReactionRemove', (reaction, user) => handleReactionRole(reaction, user, false));
 
 /* =========================
    MESAJ İŞLEYİCİ
