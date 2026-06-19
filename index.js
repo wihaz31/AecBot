@@ -310,8 +310,9 @@ const SYSTEM_PROMPT = `Sen bir Türk Discord sunucusunda yaşayan bir botsun. K�
 /* =========================
    MARKOV ZİNCİRİ
 ========================= */
+// trigram: key = "word1 word2", value = [word3, ...]
 const markovChain = new Map();
-const markovStarts = [];
+const markovStarts = []; // ["word1 word2", ...]
 let wordPool = [];
 
 function buildMarkov(messages) {
@@ -328,53 +329,57 @@ function buildMarkov(messages) {
       .split(/\s+/)
       .filter((w) => w.length > 1);
 
-    if (words.length < 2) continue;
+    if (words.length < 3) continue;
 
     words.forEach((w) => {
       if (w.length >= 3 && /^[a-zğüşıöç]+$/.test(w)) allWords.add(w);
     });
 
-    markovStarts.push(words[0]);
+    markovStarts.push(`${words[0]} ${words[1]}`);
 
-    for (let i = 0; i < words.length - 1; i++) {
-      const key = words[i];
+    for (let i = 0; i < words.length - 2; i++) {
+      const key = `${words[i]} ${words[i + 1]}`;
       if (!markovChain.has(key)) markovChain.set(key, []);
-      markovChain.get(key).push(words[i + 1]);
+      markovChain.get(key).push(words[i + 2]);
     }
   }
 
   wordPool = Array.from(allWords);
-  console.log(`[MARKOV] Model hazır: ${markovChain.size} bigram, ${markovStarts.length} başlangıç, ${wordPool.length} kelime`);
+  console.log(`[MARKOV] Model hazır: ${markovChain.size} trigram, ${markovStarts.length} başlangıç, ${wordPool.length} kelime`);
 }
 
 function randomWord() {
   return wordPool[Math.floor(Math.random() * wordPool.length)];
 }
 
-function generateMarkov(startWord = null) {
+function generateMarkov(startPair = null) {
   if (markovStarts.length === 0) return null;
 
-  const start = startWord || markovStarts[Math.floor(Math.random() * markovStarts.length)];
+  const start = startPair || markovStarts[Math.floor(Math.random() * markovStarts.length)];
+  const [w1, w2] = start.split(" ");
 
   const targetLen = Math.random() < 0.4
-    ? Math.floor(Math.random() * 3) + 3
-    : Math.floor(Math.random() * 7) + 4;
+    ? Math.floor(Math.random() * 3) + 4
+    : Math.floor(Math.random() * 7) + 5;
 
-  const result = [start];
-  let current = start;
+  const result = [w1, w2];
+  let prev = w1, cur = w2;
 
-  for (let i = 1; i < targetLen; i++) {
-    if (Math.random() < 0.35 || !markovChain.has(current)) {
+  for (let i = 2; i < targetLen; i++) {
+    const key = `${prev} ${cur}`;
+    if (!markovChain.has(key) || Math.random() < 0.15) {
       const rnd = randomWord();
       if (rnd) {
         result.push(rnd);
-        current = rnd;
+        prev = cur;
+        cur = rnd;
       } else break;
     } else {
-      const nexts = markovChain.get(current);
+      const nexts = markovChain.get(key);
       const next = nexts[Math.floor(Math.random() * nexts.length)];
       result.push(next);
-      current = next;
+      prev = cur;
+      cur = next;
     }
   }
 
@@ -1681,7 +1686,7 @@ http.createServer((req, res) => {
     res.end(JSON.stringify({
       uptime: Math.floor(process.uptime()),
       memoryEntries: memory.length,
-      markovBigrams: markovChain.size,
+      markovTrigrams: markovChain.size,
       wordPoolSize: wordPool.length,
       seed: seedState,
     }));
@@ -2013,12 +2018,14 @@ client.on('interactionCreate', async (interaction) => {
       coinReward = info.coinMin + Math.floor(Math.random() * (info.coinMax - info.coinMin + 1));
     }
     if (isStatTrak) coinReward = Math.floor(coinReward * 1.5);
-    const savesToInventory = ['restricted','classified','covert','knife'].includes(rarity);
+    const savesToInventory = rarity !== 'consumer';
     setBalance(interaction.user.id, getBalance(interaction.user.id) + coinReward);
     if (savesToInventory) addToInventory(interaction.user.id, interaction.user.username, { name: fullName, rarity, case: caseData.name, date: new Date().toISOString() });
     const rarityLabel = `${info.color} ${info.label}`;
     const stNote = isStatTrak ? ' *(StatTrak™ +50%)*' : '';
-    const inventoryNote = savesToInventory ? `\n📦 **Envantere eklendi!** +${coinReward} 🪙${stNote}` : `\n+${coinReward} 🪙${stNote}`;
+    const inventoryNote = savesToInventory
+      ? `\n📦 **Envantere eklendi!**${stNote} *(+${coinReward} 🪙 bonus)*`
+      : `\n🪙 Çok yaygın, otomatik satıldı: **+${coinReward} 🪙**`;
     await interaction.reply(`🎰 **${caseData.name}** açıldı!\n\n${rarityLabel}\n🔫 **${fullName}**${inventoryNote}\n\nYeni bakiye: ${getBalance(interaction.user.id)} 🪙`);
     return;
   }
@@ -2033,7 +2040,7 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(targetId === interaction.user.id ? 'envanterin boş! kasa açarak nadir skinler kazanabilirsin.' : `**${targetName}** kullanıcısının envanteri boş.`);
       return;
     }
-    const rarityOrder = ['knife','covert','classified','restricted','milspec'];
+    const rarityOrder = ['knife','covert','classified','restricted','milspec','consumer'];
     const sorted = [...inv.items].sort((a, b) => rarityOrder.indexOf(a.rarity) - rarityOrder.indexOf(b.rarity));
     const lines = sorted.map((item, i) => `${i + 1}. ${RARITY_INFO[item.rarity]?.color || ''} ${item.name}`);
     const chunks = [];
