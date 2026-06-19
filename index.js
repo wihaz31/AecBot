@@ -2063,7 +2063,11 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (sub === 'liste') {
       const list = Object.entries(birthdays)
-        .sort((a, b) => a[1].date.localeCompare(b[1].date))
+        .sort((a, b) => {
+          const [ad, am] = a[1].date.split("-").map(Number);
+          const [bd, bm] = b[1].date.split("-").map(Number);
+          return am !== bm ? am - bm : ad - bd;
+        })
         .map(([uid, b]) => `• ${formatBirthdayLong(b.date)} — <@${uid}>`);
       if (list.length === 0) { await interaction.reply('Henüz kayıtlı doğum günü yok.'); return; }
       await interaction.reply({ content: `🎂 **Doğum Günleri**\n${list.join('\n')}`, allowedMentions: { parse: [] } });
