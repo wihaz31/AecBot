@@ -2062,13 +2062,20 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     if (sub === 'liste') {
+      const now = trDayMonth(0);
+      const [todayDay, todayMonth] = now.key.split("-").map(Number);
       const list = Object.entries(birthdays)
         .sort((a, b) => {
           const [ad, am] = a[1].date.split("-").map(Number);
           const [bd, bm] = b[1].date.split("-").map(Number);
           return am !== bm ? am - bm : ad - bd;
         })
-        .map(([uid, b]) => `• ${formatBirthdayLong(b.date)} — <@${uid}>`);
+        .map(([uid, b]) => {
+          const [d, m] = b[1].date.split("-").map(Number);
+          const upcoming = m === todayMonth && d >= todayDay;
+          const label = `${formatBirthdayLong(b.date)} — <@${uid}>`;
+          return `• ${upcoming ? `**${label}**` : label}`;
+        });
       if (list.length === 0) { await interaction.reply('Henüz kayıtlı doğum günü yok.'); return; }
       await interaction.reply({ content: `🎂 **Doğum Günleri**\n${list.join('\n')}`, allowedMentions: { parse: [] } });
       return;
