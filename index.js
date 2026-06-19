@@ -977,12 +977,13 @@ async function findAnnounceChannel(guildId) {
 }
 
 async function checkBirthdays() {
-  if (Object.keys(birthdays).length === 0) return;
+  if (Object.keys(birthdays).length === 0) { console.log('[BDAY] Kayıt yok, atlandı'); return; }
 
   const today = trDayMonth(0);
   const tomorrow = trDayMonth(1);
   const dayKey = `${today.year}-${today.key}`;
-  if (birthdayLastRun === dayKey) return; // bugün zaten çalıştı
+  console.log(`[BDAY] Kontrol: bugün=${today.key} yarın=${tomorrow.key} lastRun=${birthdayLastRun}`);
+  if (birthdayLastRun === dayKey) { console.log('[BDAY] Bugün zaten çalıştı, atlandı'); return; }
   birthdayLastRun = dayKey;
   redisSet("birthdayLastRun", dayKey);
 
@@ -2560,6 +2561,29 @@ client.on("messageCreate", async (message) => {
     if (lower === "*gemini test") {
       const out = await askGemini("Merhaba, nasılsın?", false);
       await message.reply(out ? `Gemini: ${out}` : "Gemini yanıt vermedi (key kontrol et)");
+      return;
+    }
+    if (lower === "*bday test") {
+      const today = trDayMonth(0);
+      const tomorrow = trDayMonth(1);
+      const dayKey = `${today.year}-${today.key}`;
+      const entries = Object.entries(birthdays);
+      const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
+      const todayPeople = entries.filter(([, b]) => b.date === today.key);
+      await message.reply(
+        `📅 Bugün: ${today.key} | Yarın: ${tomorrow.key}\n` +
+        `birthdayLastRun: ${birthdayLastRun ?? 'null'} | dayKey: ${dayKey}\n` +
+        `Toplam kayıt: ${entries.length}\n` +
+        `Yarın doğum günü olanlar: ${tomorrowPeople.map(([, b]) => b.name).join(', ') || 'yok'}\n` +
+        `Bugün doğum günü olanlar: ${todayPeople.map(([, b]) => b.name).join(', ') || 'yok'}`
+      );
+      return;
+    }
+    if (lower === "*bday run") {
+      birthdayLastRun = null;
+      await message.reply("birthdayLastRun sıfırlandı, checkBirthdays çalıştırılıyor...");
+      await checkBirthdays();
+      await message.reply("checkBirthdays tamamlandı.");
       return;
     }
     if (lower === "*redis test") {
