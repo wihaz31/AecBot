@@ -702,6 +702,29 @@ function addToInventory(userId, username, item) {
   saveInventory();
 }
 
+// item.name = "StatTrak™ AK-47 | Ice Coaled (FN)"
+function calcItemPrice(item) {
+  const isSt = item.name.startsWith('StatTrak™ ');
+  const nameNoSt = isSt ? item.name.slice('StatTrak™ '.length) : item.name;
+  const condMatch = nameNoSt.match(/\((\w+)\)$/);
+  const condShort = condMatch ? condMatch[1] : 'FT';
+  const skinName = nameNoSt.replace(/\s*\(\w+\)$/, '');
+  const basePrice = SKIN_PRICES[skinName];
+  const info = RARITY_INFO[item.rarity] || RARITY_INFO.milspec;
+  let coins;
+  if (basePrice !== undefined) {
+    const condMult = CONDITION_COIN_MULT[condShort] ?? 0.28;
+    coins = Math.max(info.coinMin, Math.round(basePrice * condMult * COIN_RATE));
+  } else {
+    coins = Math.round((info.coinMin + info.coinMax) / 2);
+  }
+  return isSt ? Math.floor(coins * 1.5) : coins;
+}
+
+// Bekleyen takas teklifleri: tradeId → { senderId, targetId, senderItem, targetItem, senderIdx, targetIdx, msgId, timeout }
+const pendingTrades = new Map();
+let tradeIdCounter = 0;
+
 /* =========================
    BLACKJACK
 ========================= */
@@ -1418,6 +1441,14 @@ const SLASH_COMMANDS = [
     { name: 'Cobblestone Package', value: 'cobblestone' }
   ]}]},
   { name: 'envanter', description: 'CS2 envanterini gör', options: [{ name: 'kişi', description: 'Kullanıcı (boş = kendin)', type: ApplicationCommandOptionType.User, required: false }] },
+  { name: 'sat', description: 'Envanterdeki bir itemi coin karşılığı sat', options: [
+    { name: 'numara', description: 'Envanter numarası (/envanter ile gör)', type: ApplicationCommandOptionType.Integer, required: true, minValue: 1 }
+  ]},
+  { name: 'takas', description: 'Başka bir kullanıcıyla item takası yap', options: [
+    { name: 'kişi', description: 'Takas yapılacak kişi', type: ApplicationCommandOptionType.User, required: true },
+    { name: 'ver', description: 'Kendi envanter numaranı ver (0 = sadece ver, takas alma)', type: ApplicationCommandOptionType.Integer, required: true, minValue: 0 },
+    { name: 'al', description: 'Karşının envanter numarası (0 = sadece ver, karşılık alma)', type: ApplicationCommandOptionType.Integer, required: false, minValue: 1 },
+  ]},
   { name: 'ai', description: 'Yapay zeka ile konuş', options: [{ name: 'mesaj', description: 'Mesajın', type: ApplicationCommandOptionType.String, required: false }] },
   { name: 'hafıza', description: 'Eski bir mesajı hatırla' },
   { name: 'gökhan', description: "Gökhan Roblox'ta mı?" },
@@ -1701,6 +1732,54 @@ http.createServer((req, res) => {
    INTERACTION HANDLER
 ========================= */
 client.on('interactionCreate', async (interaction) => {
+  // Takas butonları
+  if (interaction.isButton() && (interaction.customId.startsWith('takas_accept_') || interaction.customId.startsWith('takas_decline_'))) {
+    const tradeId = parseInt(interaction.customId.split('_')[2]);
+    const trade = pendingTrades.get(tradeId);
+    if (!trade) { await interaction.reply({ content: 'Bu takas teklifi süresi dolmuş veya geçersiz.', flags: 64 }); return; }
+    if (interaction.user.id !== trade.targetId) { await interaction.reply({ content: 'Bu teklif sana ait değil.', flags: 64 }); return; }
+
+    clearTimeout(trade.timeout);
+    pendingTrades.delete(tradeId);
+
+    const senderInv = inventory[trade.senderId];
+    const targetInv = inventory[trade.targetId];
+
+    if (interaction.customId.startsWith('takas_decline_')) {
+      await interaction.update({ content: `❌ **Takas reddedildi.**`, components: [] });
+      return;
+    }
+
+    // Kabul — itemi doğrula ve takas et
+    if (!senderInv || !senderInv.items[trade.senderIdx]) {
+      await interaction.update({ content: '❌ Teklif eden kullanıcının itemi artık mevcut değil.', components: [] }); return;
+    }
+    if (trade.targetIdx !== null && (!targetInv || !targetInv.items[trade.targetIdx])) {
+      await interaction.update({ content: '❌ Senin iteminiz artık mevcut değil.', components: [] }); return;
+    }
+
+    const senderItem = senderInv.items[trade.senderIdx];
+    if (trade.targetIdx !== null) {
+      const targetItem = targetInv.items[trade.targetIdx];
+      senderInv.items.splice(trade.senderIdx, 1);
+      targetInv.items.splice(trade.targetIdx, 1);
+      if (!inventory[trade.targetId]) inventory[trade.targetId] = { username: interaction.user.username, items: [] };
+      if (!inventory[trade.senderId]) inventory[trade.senderId] = { username: trade.senderName, items: [] };
+      inventory[trade.targetId].items.push(senderItem);
+      inventory[trade.senderId].items.push(targetItem);
+      saveInventory();
+      await interaction.update({ content: `✅ **Takas tamamlandı!**\n<@${trade.senderId}> → **${senderItem.name}** ↔ <@${trade.targetId}> → **${targetItem.name}**`, components: [], allowedMentions: { parse: [] } });
+    } else {
+      // Karşılıksız transfer (hediye)
+      senderInv.items.splice(trade.senderIdx, 1);
+      if (!inventory[trade.targetId]) inventory[trade.targetId] = { username: interaction.user.username, items: [] };
+      inventory[trade.targetId].items.push(senderItem);
+      saveInventory();
+      await interaction.update({ content: `✅ **Transfer tamamlandı!**\n<@${trade.senderId}> → <@${trade.targetId}>: **${senderItem.name}**`, components: [], allowedMentions: { parse: [] } });
+    }
+    return;
+  }
+
   // Blackjack butonu
   if (interaction.isButton()) {
     if (interaction.customId !== 'bj_hit' && interaction.customId !== 'bj_stand') return;
@@ -2055,6 +2134,102 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  if (cmd === 'sat') {
+    const num = interaction.options.getInteger('numara');
+    const inv = inventory[interaction.user.id];
+    if (!inv || inv.items.length === 0) { await interaction.reply({ content: 'Envanterin boş.', flags: 64 }); return; }
+    const rarityOrder = ['knife','covert','classified','restricted','milspec','consumer'];
+    const sorted = [...inv.items].map((item, origIdx) => ({ item, origIdx }))
+      .sort((a, b) => rarityOrder.indexOf(a.item.rarity) - rarityOrder.indexOf(b.item.rarity));
+    if (num > sorted.length) { await interaction.reply({ content: `Geçersiz numara. Envanterin ${sorted.length} item içeriyor.`, flags: 64 }); return; }
+    const { item, origIdx } = sorted[num - 1];
+    const coins = calcItemPrice(item);
+    inv.items.splice(origIdx, 1);
+    saveInventory();
+    setBalance(interaction.user.id, getBalance(interaction.user.id) + coins);
+    const info = RARITY_INFO[item.rarity] || RARITY_INFO.milspec;
+    await interaction.reply({ content: `${info.color} **${item.name}** satıldı: **+${coins} 🪙**\nYeni bakiye: ${getBalance(interaction.user.id)} 🪙`, flags: 64 });
+    return;
+  }
+
+  if (cmd === 'takas') {
+    const targetUser = interaction.options.getUser('kişi');
+    const verNum = interaction.options.getInteger('ver');
+    const alNum = interaction.options.getInteger('al') ?? null;
+
+    if (targetUser.id === interaction.user.id) { await interaction.reply({ content: 'Kendine takas yapamazsın.', flags: 64 }); return; }
+    if (targetUser.bot) { await interaction.reply({ content: 'Botlara takas yapamazsın.', flags: 64 }); return; }
+
+    const senderInv = inventory[interaction.user.id];
+    if (verNum > 0 && (!senderInv || senderInv.items.length === 0)) { await interaction.reply({ content: 'Envanterin boş.', flags: 64 }); return; }
+
+    const rarityOrder = ['knife','covert','classified','restricted','milspec','consumer'];
+    let senderSorted = [], targetSorted = [];
+    if (verNum > 0) {
+      senderSorted = [...(senderInv?.items || [])].map((item, origIdx) => ({ item, origIdx }))
+        .sort((a, b) => rarityOrder.indexOf(a.item.rarity) - rarityOrder.indexOf(b.item.rarity));
+      if (verNum > senderSorted.length) { await interaction.reply({ content: `Geçersiz numara. Envanterin ${senderSorted.length} item içeriyor.`, flags: 64 }); return; }
+    }
+
+    let targetOrigIdx = null;
+    let targetItemDisplay = '_Karşılıksız transfer_';
+    if (alNum !== null) {
+      const targetInv = inventory[targetUser.id];
+      if (!targetInv || targetInv.items.length === 0) { await interaction.reply({ content: `**${targetUser.username}** kullanıcısının envanteri boş.`, flags: 64 }); return; }
+      targetSorted = [...targetInv.items].map((item, origIdx) => ({ item, origIdx }))
+        .sort((a, b) => rarityOrder.indexOf(a.item.rarity) - rarityOrder.indexOf(b.item.rarity));
+      if (alNum > targetSorted.length) { await interaction.reply({ content: `Geçersiz numara. **${targetUser.username}** kullanıcısının envanterinde ${targetSorted.length} item var.`, flags: 64 }); return; }
+      targetOrigIdx = targetSorted[alNum - 1].origIdx;
+      const ti = targetSorted[alNum - 1].item;
+      const tiInfo = RARITY_INFO[ti.rarity] || RARITY_INFO.milspec;
+      targetItemDisplay = `${tiInfo.color} **${ti.name}**`;
+    }
+
+    const senderOrigIdx = verNum > 0 ? senderSorted[verNum - 1].origIdx : null;
+    let senderItemDisplay = '_Karşılıksız transfer_';
+    if (verNum > 0) {
+      const si = senderSorted[verNum - 1].item;
+      const siInfo = RARITY_INFO[si.rarity] || RARITY_INFO.milspec;
+      senderItemDisplay = `${siInfo.color} **${si.name}**`;
+    }
+
+    const tradeId = ++tradeIdCounter;
+    const timeout = setTimeout(async () => {
+      if (pendingTrades.has(tradeId)) {
+        pendingTrades.delete(tradeId);
+        try {
+          const ch = interaction.channel;
+          const msg = await ch.messages.fetch(pendingTrades.get(tradeId)?.msgId).catch(() => null);
+          if (msg) await msg.edit({ content: '⏰ Takas teklifi süresi doldu.', components: [] });
+        } catch {}
+      }
+    }, 60000);
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`takas_accept_${tradeId}`).setLabel('✅ Kabul').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`takas_decline_${tradeId}`).setLabel('❌ Reddet').setStyle(ButtonStyle.Danger),
+    );
+
+    const content = [
+      `**Takas Teklifi** — <@${targetUser.id}>, kabul ediyor musun? *(60 sn)*`,
+      ``,
+      `<@${interaction.user.id}> veriyor: ${senderItemDisplay}`,
+      `<@${targetUser.id}> veriyor: ${targetItemDisplay}`,
+    ].join('\n');
+
+    const msg = await interaction.reply({ content, components: [row], fetchReply: true, allowedMentions: { users: [targetUser.id] } });
+    pendingTrades.set(tradeId, {
+      senderId: interaction.user.id,
+      senderName: interaction.user.username,
+      targetId: targetUser.id,
+      senderIdx: senderOrigIdx,
+      targetIdx: targetOrigIdx,
+      msgId: msg.id,
+      timeout,
+    });
+    return;
+  }
+
   // === DİĞER ===
   if (cmd === 'ai') {
     await interaction.deferReply();
@@ -2257,7 +2432,7 @@ client.on('interactionCreate', async (interaction) => {
       '`/çal` / `/dur` / `/devam` / `/atla` / `/kuyruk` / `/çık` — müzik',
       '`/kelime` / `/kelimeson` / `/tahmin` — sözel oyunlar',
       '`/doğumgünü` — doğum günü ekle/sil/liste',
-      '`/kasalar` / `/kasa` / `/envanter` — CS2',
+      '`/kasalar` / `/kasa` / `/envanter` / `/sat` / `/takas` — CS2',
       '`/hafıza` / `/gökhan` / `/roblox` — diğer',
       '`/ayar` — sohbet/seed kanalı ayarla (yönetici)',
       '`/roller` — reaction rol menüsü oluştur/yönet (yönetici)',
