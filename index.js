@@ -1639,6 +1639,22 @@ client.once("ready", async () => {
         channelNames.push(channel.name);
         console.log(`[SEED] ${channel.name} kanalından mesajlar yükleniyor...`);
 
+        const COMBINE_GAP_MS = 5 * 60 * 1000;
+        let seedPending = null; // { authorId, username, timestamp, text }
+        function flushSeedPending() {
+          if (!seedPending) return;
+          const { username, text } = seedPending;
+          if (!containsReligiousAbuse(text)) {
+            rawMessages.push(text);
+            const entry = `${username}: ${text}`;
+            if (!memorySet.has(normalizeText(entry))) {
+              memory.push(entry);
+              memorySet.add(normalizeText(entry));
+            }
+          }
+          seedPending = null;
+        }
+
         let lastId = null;
         let fetched = 0;
         while (fetched < SEED_MAX) {
@@ -1654,17 +1670,20 @@ client.once("ready", async () => {
           if (msgs.size === 0) break;
           let tooOld = false;
           for (const m of msgs.values()) {
-            if (m.createdTimestamp < cutoff) { tooOld = true; break; }
-            if (!m.author.bot && m.content.length > 0 && m.content.length <= MAX_WORDS_PER_MESSAGE * 8) {
-              const txt = m.content.trim();
-              if (!containsReligiousAbuse(txt)) {
-                rawMessages.push(txt);
-                const entry = `${m.author.username}: ${txt}`;
-                if (!memorySet.has(normalizeText(entry))) {
-                  memory.push(entry);
-                  memorySet.add(normalizeText(entry));
-                }
-              }
+            if (m.createdTimestamp < cutoff) { tooOld = true; flushSeedPending(); break; }
+            if (m.author.bot || !m.content || m.content.length > MAX_WORDS_PER_MESSAGE * 8) {
+              flushSeedPending();
+              continue;
+            }
+            const txt = m.content.trim();
+            if (!txt) continue;
+            // msgs gelişi en yeniden eskiye; pending.timestamp > m.createdTimestamp
+            if (seedPending && seedPending.authorId === m.author.id && (seedPending.timestamp - m.createdTimestamp) < COMBINE_GAP_MS) {
+              seedPending.text = txt + " " + seedPending.text;
+              seedPending.timestamp = m.createdTimestamp;
+            } else {
+              flushSeedPending();
+              seedPending = { authorId: m.author.id, username: m.author.username, timestamp: m.createdTimestamp, text: txt };
             }
           }
           fetched += msgs.size;
@@ -1675,6 +1694,7 @@ client.once("ready", async () => {
           if (tooOld) break;
           await sleep(120);
         }
+        flushSeedPending();
       }
 
       seedState.channelName = channelNames.join(", ");
@@ -2544,12 +2564,17 @@ client.on("messageCreate", async (message) => {
       const username = message.author.username || "biri";
       const entry = `${username}: ${content}`;
       const last = memory[memory.length - 1];
-      if (last && last.startsWith(username + ": ")) {
+      const lastTs = memory._lastTs || 0;
+      const now = Date.now();
+      const sameUserRecent = last && last.startsWith(username + ": ") && (now - lastTs) < 5 * 60 * 1000;
+      if (sameUserRecent) {
         memory[memory.length - 1] = last + " " + content;
         memorySet.add(normalizeText(memory[memory.length - 1]));
+        memory._lastTs = now;
       } else {
         memory.push(entry);
         memorySet.add(normalizeText(entry));
+        memory._lastTs = now;
         if (memory.length > MAX_MEMORY_MESSAGES) {
           const removed = memory.shift();
           memorySet.delete(normalizeText(removed));
