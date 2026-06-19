@@ -2071,7 +2071,7 @@ client.on('interactionCreate', async (interaction) => {
           return am !== bm ? am - bm : ad - bd;
         })
         .map(([uid, b]) => {
-          const [d, m] = b[1].date.split("-").map(Number);
+          const [d, m] = b.date.split("-").map(Number);
           const upcoming = m === todayMonth && d >= todayDay;
           const label = `${formatBirthdayLong(b.date)} — <@${uid}>`;
           return `• ${upcoming ? `**${label}**` : label}`;
