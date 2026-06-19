@@ -900,6 +900,12 @@ function formatBirthday(date) {
   return `${d}.${mo}`;
 }
 
+const TR_MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+function formatBirthdayLong(date) {
+  const [d, mo] = date.split("-");
+  return `${parseInt(d, 10)} ${TR_MONTHS[parseInt(mo, 10) - 1]}`;
+}
+
 // Türkiye saatine göre gün-ay döndürür
 function trDayMonth(offsetDays = 0) {
   const now = new Date();
@@ -2058,7 +2064,7 @@ client.on('interactionCreate', async (interaction) => {
     if (sub === 'liste') {
       const list = Object.entries(birthdays)
         .sort((a, b) => a[1].date.localeCompare(b[1].date))
-        .map(([uid, b]) => `• ${formatBirthday(b.date)} — <@${uid}>`);
+        .map(([uid, b]) => `• ${formatBirthdayLong(b.date)} — <@${uid}>`);
       if (list.length === 0) { await interaction.reply('Henüz kayıtlı doğum günü yok.'); return; }
       await interaction.reply({ content: `🎂 **Doğum Günleri**\n${list.join('\n')}`, allowedMentions: { parse: [] } });
       return;
