@@ -1532,8 +1532,99 @@ const SLASH_COMMANDS = [
       },
     ],
   },
+  { name: 'seed-yenile', description: 'Seed kanallarını sıfırdan tara ve Markov modelini yenile (yönetici)', defaultMemberPermissions: String(PermissionFlagsBits.ManageGuild) },
   { name: 'yardım', description: 'Komut listesi' },
 ];
+
+/* =========================
+   SEED FONKSIYONU
+========================= */
+const COMBINE_GAP_MS = 5 * 60 * 1000;
+
+async function runSeed() {
+  if (seedState.running) return;
+  try {
+    const rawMessages = [];
+    memory.length = 0;
+    memorySet.clear();
+    seedState.running = true;
+    seedState.done = false;
+    seedState.error = null;
+    seedState.collected = 0;
+    seedState.fetchCount = 0;
+    seedState.startedAt = Date.now();
+    const cutoff = Date.now() - SEED_DAYS * 24 * 60 * 60 * 1000;
+
+    const channelNames = [];
+    for (const channelId of seedChannelIds) {
+      let channel;
+      try { channel = await client.channels.fetch(channelId); } catch { continue; }
+      if (!channel?.isTextBased()) continue;
+      channelNames.push(channel.name);
+      console.log(`[SEED] ${channel.name} kanalından mesajlar yükleniyor...`);
+
+      let seedPending = null;
+      function flushSeedPending() {
+        if (!seedPending) return;
+        const { username, text } = seedPending;
+        if (!containsReligiousAbuse(text)) {
+          rawMessages.push(text);
+          const entry = `${username}: ${text}`;
+          if (!memorySet.has(normalizeText(entry))) {
+            memory.push(entry);
+            memorySet.add(normalizeText(entry));
+          }
+        }
+        seedPending = null;
+      }
+
+      let lastId = null;
+      let fetched = 0;
+      while (fetched < SEED_MAX) {
+        const opts = { limit: 100 };
+        if (lastId) opts.before = lastId;
+        let msgs;
+        try { msgs = await channel.messages.fetch(opts); } catch (e) { seedState.error = e.message; break; }
+        if (msgs.size === 0) break;
+        let tooOld = false;
+        for (const m of msgs.values()) {
+          if (m.createdTimestamp < cutoff) { tooOld = true; flushSeedPending(); break; }
+          if (m.author.bot || !m.content || m.content.length > MAX_WORDS_PER_MESSAGE * 8) { flushSeedPending(); continue; }
+          const txt = m.content.trim();
+          if (!txt) continue;
+          if (seedPending && seedPending.authorId === m.author.id && (seedPending.timestamp - m.createdTimestamp) < COMBINE_GAP_MS) {
+            seedPending.text = txt + " " + seedPending.text;
+            seedPending.timestamp = m.createdTimestamp;
+          } else {
+            flushSeedPending();
+            seedPending = { authorId: m.author.id, username: m.author.username, timestamp: m.createdTimestamp, text: txt };
+          }
+        }
+        fetched += msgs.size;
+        seedState.collected = rawMessages.length;
+        seedState.fetchCount = fetched;
+        seedState.lastUpdateAt = Date.now();
+        lastId = msgs.last()?.id;
+        if (tooOld) break;
+        await sleep(120);
+      }
+      flushSeedPending();
+    }
+
+    seedState.channelName = channelNames.join(", ");
+    buildMarkov(rawMessages);
+    if (memory.length > MAX_MEMORY_MESSAGES) memory.splice(0, memory.length - MAX_MEMORY_MESSAGES);
+    uploadMemoryToGemini();
+    saveSeedMemory();
+    seedState.running = false;
+    seedState.done = true;
+    console.log(`[SEED] Tamamlandı: ${rawMessages.length} mesaj, ${memory.length} hafıza`);
+  } catch (e) {
+    seedState.running = false;
+    seedState.error = e.message;
+    console.error("[SEED] Hata:", e.message);
+  }
+}
 
 /* =========================
    DİSCORD
@@ -1623,93 +1714,7 @@ client.once("ready", async () => {
     seedState.done = true;
     console.log(`[SEED] Redis cache'inden yüklendi: ${memory.length} mesaj (Discord taraması atlandı)`);
   } else {
-    try {
-      const rawMessages = [];
-      seedState.running = true;
-      seedState.startedAt = Date.now();
-      const cutoff = Date.now() - SEED_DAYS * 24 * 60 * 60 * 1000;
-
-      const channelNames = [];
-      for (const channelId of seedChannelIds) {
-        let channel;
-        try {
-          channel = await client.channels.fetch(channelId);
-        } catch { continue; }
-        if (!channel?.isTextBased()) continue;
-        channelNames.push(channel.name);
-        console.log(`[SEED] ${channel.name} kanalından mesajlar yükleniyor...`);
-
-        const COMBINE_GAP_MS = 5 * 60 * 1000;
-        let seedPending = null; // { authorId, username, timestamp, text }
-        function flushSeedPending() {
-          if (!seedPending) return;
-          const { username, text } = seedPending;
-          if (!containsReligiousAbuse(text)) {
-            rawMessages.push(text);
-            const entry = `${username}: ${text}`;
-            if (!memorySet.has(normalizeText(entry))) {
-              memory.push(entry);
-              memorySet.add(normalizeText(entry));
-            }
-          }
-          seedPending = null;
-        }
-
-        let lastId = null;
-        let fetched = 0;
-        while (fetched < SEED_MAX) {
-          const opts = { limit: 100 };
-          if (lastId) opts.before = lastId;
-          let msgs;
-          try {
-            msgs = await channel.messages.fetch(opts);
-          } catch (e) {
-            seedState.error = e.message;
-            break;
-          }
-          if (msgs.size === 0) break;
-          let tooOld = false;
-          for (const m of msgs.values()) {
-            if (m.createdTimestamp < cutoff) { tooOld = true; flushSeedPending(); break; }
-            if (m.author.bot || !m.content || m.content.length > MAX_WORDS_PER_MESSAGE * 8) {
-              flushSeedPending();
-              continue;
-            }
-            const txt = m.content.trim();
-            if (!txt) continue;
-            // msgs gelişi en yeniden eskiye; pending.timestamp > m.createdTimestamp
-            if (seedPending && seedPending.authorId === m.author.id && (seedPending.timestamp - m.createdTimestamp) < COMBINE_GAP_MS) {
-              seedPending.text = txt + " " + seedPending.text;
-              seedPending.timestamp = m.createdTimestamp;
-            } else {
-              flushSeedPending();
-              seedPending = { authorId: m.author.id, username: m.author.username, timestamp: m.createdTimestamp, text: txt };
-            }
-          }
-          fetched += msgs.size;
-          seedState.collected = rawMessages.length;
-          seedState.fetchCount = fetched;
-          seedState.lastUpdateAt = Date.now();
-          lastId = msgs.last()?.id;
-          if (tooOld) break;
-          await sleep(120);
-        }
-        flushSeedPending();
-      }
-
-      seedState.channelName = channelNames.join(", ");
-      buildMarkov(rawMessages);
-      if (memory.length > MAX_MEMORY_MESSAGES) memory.splice(0, memory.length - MAX_MEMORY_MESSAGES);
-      uploadMemoryToGemini();
-      saveSeedMemory();
-      seedState.running = false;
-      seedState.done = true;
-      console.log(`[SEED] Tamamlandı: ${rawMessages.length} mesaj, ${memory.length} hafıza`);
-    } catch (e) {
-      seedState.running = false;
-      seedState.error = e.message;
-      console.error("[SEED] Hata:", e.message);
-    }
+    runSeed();
   }
 });
 
@@ -2364,6 +2369,16 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: `**Sunucu Ayarları**\nSohbet/kutlama: ${sohbet}\nÖğrenme (seed): ${seed}`, flags: 64 });
       return;
     }
+    return;
+  }
+
+  if (cmd === 'seed-yenile') {
+    if (seedState.running) {
+      await interaction.reply({ content: `⏳ Seed zaten çalışıyor (${seedState.collected} mesaj toplandı).`, flags: 64 });
+      return;
+    }
+    await interaction.reply({ content: `🔄 Seed başlatıldı — kanallar: **${[...seedChannelIds].join(', ')}**\nBu işlem birkaç dakika sürebilir.`, flags: 64 });
+    runSeed();
     return;
   }
 
