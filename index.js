@@ -941,14 +941,17 @@ async function checkBirthdays() {
 
   const entries = Object.entries(birthdays);
 
-  // 1. Yarın doğum günü olanlar -> sohbet kanalına hatırlatma
+  // 1. Yarın doğum günü olanlar -> diğer kayıtlı kullanıcılara DM
   const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
   for (const [uid, info] of tomorrowPeople) {
-    const channel = await findAnnounceChannel(info.guildId);
-    if (channel) {
+    const name = info.name || "birinin";
+    for (const [otherId] of entries) {
+      if (otherId === uid) continue; // doğum günü olan kişiye atma
       try {
-        await channel.send(`🎂 Hatırlatma: **Yarın <@${uid}>'in doğum günü!** Kutlamayı unutmayın 🎉`);
+        const user = await client.users.fetch(otherId);
+        await user.send(`🎂 Yarın **${name}**'in doğum günü! Kutlamayı unutma 🎉`);
       } catch {}
+      await sleep(500);
     }
   }
 
