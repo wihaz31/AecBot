@@ -504,11 +504,11 @@ function drawWheelFrame(ctx, options, rotation, size) {
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Ok (üstte)
+  // Ok (üstte, aşağı bakıyor — çarka doğru)
   ctx.beginPath();
-  ctx.moveTo(cx, 4);
-  ctx.lineTo(cx - 13, 28);
-  ctx.lineTo(cx + 13, 28);
+  ctx.moveTo(cx, 28);      // ok ucu aşağıda
+  ctx.lineTo(cx - 13, 4);  // sol üst
+  ctx.lineTo(cx + 13, 4);  // sağ üst
   ctx.closePath();
   ctx.fillStyle = '#FFFFFF';
   ctx.shadowColor = 'rgba(0,0,0,0.8)';
@@ -528,8 +528,9 @@ async function generateWheelGif(options, winnerIdx) {
   // Ok üstte (-π/2). winnerIdx segmentinin ortası ok altına gelsin:
   // segMid = (winnerIdx + 0.5) / n * 2π
   // rotation + segMid - π/2 = 0 → rotation = π/2 - segMid
-  const winnerRotation = Math.PI / 2 - (winnerIdx + 0.5) / n * Math.PI * 2;
-  const totalRotation = winnerRotation + 8 * Math.PI * 2; // 8 tam tur + kazanan açısı
+  // final rotation: R + (winnerIdx+0.5)/n*2π - π/2 = -π/2 → R = -(winnerIdx+0.5)/n*2π
+  // pozitif tutmak için 9 tam tur ekle: R = (9 - (winnerIdx+0.5)/n) * 2π
+  const totalRotation = (9 - (winnerIdx + 0.5) / n) * Math.PI * 2;
 
   const encoder = new GIFEncoder(size, size, 'octree', false);
   encoder.setRepeat(-1); // bir kez oyna
