@@ -522,62 +522,39 @@ function drawWheelFrame(ctx, options, rotation, size) {
   ctx.stroke();
 }
 
-async function generateWheelVideo(options, winnerIdx) {
+async function generateWheelGif(options, winnerIdx) {
   const size = 600;
   const n = options.length;
   const FRAMES = 50;
 
   const totalRotation = (9 - (winnerIdx + 0.5) / n) * Math.PI * 2;
 
+  const encoder = new GIFEncoder(size, size, 'neuquant', false);
+  encoder.setRepeat(-1);
+  encoder.setQuality(5);
+  encoder.start();
+
   const canvas = createCanvas(size, size);
   const ctx = canvas.getContext('2d');
 
-  // Her frame için {rotation, duration(sn)} listesi
-  const frames = [];
   for (let f = 0; f <= FRAMES; f++) {
     const t = f / FRAMES;
     const eased = 1 - Math.pow(1 - t, 3);
     const rotation = totalRotation * eased;
-    let dur;
-    if (t < 0.5)       dur = 0.030;
-    else if (t < 0.75) dur = 0.030 + 0.150 * ((t - 0.5) / 0.25);
-    else               dur = 0.180 + 0.170 * ((t - 0.75) / 0.25);
-    if (f === FRAMES)  dur = 2.5; // son karede bekle
-    frames.push({ rotation, dur });
+
+    let delay;
+    if (t < 0.5)       delay = 30;
+    else if (t < 0.75) delay = 30 + Math.round(150 * ((t - 0.5) / 0.25));
+    else               delay = 180 + Math.round(170 * ((t - 0.75) / 0.25));
+    if (f === FRAMES)  delay = 2500;
+
+    encoder.setDelay(delay);
+    drawWheelFrame(ctx, options, rotation, size);
+    encoder.addFrame(ctx);
   }
 
-  const tmpDir = fs.mkdtempSync(require('path').join(os.tmpdir(), 'wheel_'));
-  try {
-    const concatLines = [];
-    for (let i = 0; i < frames.length; i++) {
-      drawWheelFrame(ctx, options, frames[i].rotation, size);
-      const pngPath = require('path').join(tmpDir, `f${String(i).padStart(4,'0')}.png`);
-      fs.writeFileSync(pngPath, canvas.toBuffer('image/png'));
-      concatLines.push(`file '${pngPath}'`);
-      concatLines.push(`duration ${frames[i].dur.toFixed(3)}`);
-    }
-    // ffmpeg concat: son dosyayı tekrar ekle
-    const lastPath = require('path').join(tmpDir, `f${String(frames.length-1).padStart(4,'0')}.png`);
-    concatLines.push(`file '${lastPath}'`);
-    const concatFile = require('path').join(tmpDir, 'list.txt');
-    fs.writeFileSync(concatFile, concatLines.join('\n'));
-
-    const outPath = require('path').join(tmpDir, 'wheel.mp4');
-    await new Promise((resolve, reject) => {
-      const ff = spawn(ffmpegStatic, [
-        '-f', 'concat', '-safe', '0', '-i', concatFile,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
-        '-y', outPath,
-      ]);
-      ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}`)));
-      ff.stderr.on('data', () => {});
-    });
-
-    return fs.readFileSync(outPath);
-  } finally {
-    try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
-  }
+  encoder.finish();
+  return Buffer.from(encoder.out.getData());
 }
 
 /* =========================
@@ -2546,8 +2523,8 @@ client.on('interactionCreate', async (interaction) => {
     if (options.length > 20) { await interaction.reply({ content: 'En fazla 20 seçenek girebilirsin.', flags: 64 }); return; }
     await interaction.deferReply();
     const winnerIdx = Math.floor(Math.random() * options.length);
-    const video = await generateWheelVideo(options, winnerIdx);
-    const attachment = new AttachmentBuilder(video, { name: 'cark.mp4' });
+    const gif = await generateWheelGif(options, winnerIdx);
+    const attachment = new AttachmentBuilder(gif, { name: 'cark.gif' });
     await interaction.editReply({ content: `🎡 **${options[winnerIdx]}** seçildi!`, files: [attachment] });
     return;
   }
