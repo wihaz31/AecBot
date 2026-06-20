@@ -2400,22 +2400,30 @@ client.on('interactionCreate', async (interaction) => {
 
   if (cmd === 'roller') {
     const sub = interaction.options.getSubcommand();
+
+    // Mesaj ID veya başlık adına göre menü bul
+    function findMenu(input) {
+      const guildId = interaction.guildId;
+      if (roleMenus[input]?.guildId === guildId) return [input, roleMenus[input]];
+      const lower = input.toLowerCase();
+      const found = Object.entries(roleMenus).find(([, m]) => m.guildId === guildId && m.title.toLowerCase() === lower);
+      return found || [null, null];
+    }
+
     if (sub === 'oluştur') {
       const title = interaction.options.getString('başlık');
       const msg = await interaction.channel.send(`**Role Menu: ${title}**\nReact to give yourself a role.\n\n_Henüz rol eklenmedi. \`/roller ekle\` ile ekleyin._`);
       roleMenus[msg.id] = { guildId: interaction.guildId, channelId: interaction.channelId, title, roles: [] };
       saveRoleMenus();
-      await interaction.reply({ content: `Rol menüsü oluşturuldu! Mesaj ID: \`${msg.id}\`\nRol eklemek için: \`/roller ekle mesaj:${msg.id} emoji:🎮 rol:@RolAdı\``, flags: 64 });
+      await interaction.reply({ content: `Rol menüsü oluşturuldu!\nEklemek için: \`/roller ekle mesaj:${title} emoji:🎮 rol:@RolAdı\``, flags: 64 });
       return;
     }
     if (sub === 'ekle') {
-      const msgId = interaction.options.getString('mesaj');
+      const input = interaction.options.getString('mesaj');
       const emoji = interaction.options.getString('emoji').trim();
       const role = interaction.options.getRole('rol');
-      const menu = roleMenus[msgId];
-      if (!menu || menu.guildId !== interaction.guildId) {
-        await interaction.reply({ content: 'Bu ID\'ye ait bir rol menüsü bulunamadı.', flags: 64 }); return;
-      }
+      const [msgId, menu] = findMenu(input);
+      if (!menu) { await interaction.reply({ content: 'Rol menüsü bulunamadı. Başlık adını veya mesaj ID\'sini kontrol et.', flags: 64 }); return; }
       if (menu.roles.some(r => r.emoji === emoji)) {
         await interaction.reply({ content: 'Bu emoji zaten menüde var.', flags: 64 }); return;
       }
@@ -2433,12 +2441,10 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     if (sub === 'çıkar') {
-      const msgId = interaction.options.getString('mesaj');
+      const input = interaction.options.getString('mesaj');
       const emoji = interaction.options.getString('emoji').trim();
-      const menu = roleMenus[msgId];
-      if (!menu || menu.guildId !== interaction.guildId) {
-        await interaction.reply({ content: 'Rol menüsü bulunamadı.', flags: 64 }); return;
-      }
+      const [msgId, menu] = findMenu(input);
+      if (!menu) { await interaction.reply({ content: 'Rol menüsü bulunamadı.', flags: 64 }); return; }
       const before = menu.roles.length;
       menu.roles = menu.roles.filter(r => r.emoji !== emoji);
       if (menu.roles.length === before) {
@@ -2455,11 +2461,9 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     if (sub === 'sil') {
-      const msgId = interaction.options.getString('mesaj');
-      const menu = roleMenus[msgId];
-      if (!menu || menu.guildId !== interaction.guildId) {
-        await interaction.reply({ content: 'Rol menüsü bulunamadı.', flags: 64 }); return;
-      }
+      const input = interaction.options.getString('mesaj');
+      const [msgId, menu] = findMenu(input);
+      if (!menu) { await interaction.reply({ content: 'Rol menüsü bulunamadı.', flags: 64 }); return; }
       try {
         const ch = await client.channels.fetch(menu.channelId);
         const msg = await ch.messages.fetch(msgId);
