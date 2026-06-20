@@ -49,6 +49,8 @@ const CMD_KEY = process.env.CMD_KEY || "";
 // Kick
 const KICK_CHANNEL_SLUG = "zeitnot";
 const KICK_NOTIFY_CHANNEL_ID = "705537838770421761";
+// Kick Pusher kanal ID — kick.com/zeitnot sayfasında F12 > Network > zeitnot isteği > JSON'daki "id"
+const KICK_CHANNEL_ID = process.env.KICK_CHANNEL_ID || "";
 
 // Roblox
 const ROBLOX_USER_ID = "2575829815";
@@ -1154,51 +1156,72 @@ async function checkBirthdays() {
 ========================= */
 let kickWasLive = false;
 
-async function checkKick() {
-  const ENDPOINTS = [
-    `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
-    `https://kick.com/api/internal/v2/channels/${KICK_CHANNEL_SLUG}`,
-    `https://kick.com/api/v1/channels/${KICK_CHANNEL_SLUG}`,
-  ];
-  const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8",
-    "Referer": "https://kick.com/",
-    "Origin": "https://kick.com",
-  };
-
-  let data = null;
-  for (const url of ENDPOINTS) {
-    try {
-      const r = await fetchWithTimeout(url, { headers: HEADERS }, 8000);
-      const ct = r.headers.get("content-type") || "";
-      if (!r.ok) { console.log(`[KICK] ${url} → ${r.status}`); continue; }
-      if (!ct.includes("json")) { console.log(`[KICK] ${url} → JSON değil (${ct})`); continue; }
-      data = await r.json();
-      break;
-    } catch (e) {
-      console.log(`[KICK] ${url} → hata: ${e.message?.slice(0, 60)}`);
+async function sendKickNotification() {
+  try {
+    const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
+    if (ch?.isTextBased()) {
+      await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
     }
-  }
-
-  if (!data) return;
-
-  const isLive = !!(data.livestream || data.is_live || data.channel?.is_live);
-  if (isLive && !kickWasLive) {
-    kickWasLive = true;
-    try {
-      const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
-      if (ch?.isTextBased()) {
-        await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
-      }
-    } catch {}
-    console.log(`[KICK] Yayın başladı, bildirim gönderildi`);
-  } else if (!isLive) {
-    if (kickWasLive) console.log(`[KICK] Yayın bitti`);
-    kickWasLive = false;
+    console.log(`[KICK] Bildirim gönderildi`);
+  } catch (e) {
+    console.error(`[KICK] Bildirim hatası: ${e.message}`);
   }
 }
+
+function startKickPusher() {
+  if (!KICK_CHANNEL_ID) {
+    console.log(`[KICK] KICK_CHANNEL_ID ayarlanmamış, Pusher başlatılmıyor`);
+    return;
+  }
+  const WS = require('ws');
+  const PUSHER_URL = `wss://ws-us2.pusher.com/app/eb1d5f283081a78b932c?protocol=7&client=js&version=8.4.0&flash=false`;
+  let reconnectDelay = 5000;
+
+  function connect() {
+    const ws = new WS(PUSHER_URL);
+
+    ws.on('open', () => {
+      console.log(`[KICK] Pusher bağlandı`);
+      reconnectDelay = 5000;
+      ws.send(JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { auth: '', channel: `channel.${KICK_CHANNEL_ID}` },
+      }));
+    });
+
+    ws.on('message', async (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { return; }
+
+      if (msg.event === 'App\\Events\\StreamerIsLive') {
+        if (!kickWasLive) {
+          kickWasLive = true;
+          await sendKickNotification();
+        }
+      } else if (msg.event === 'App\\Events\\StreamerIsOffline') {
+        console.log(`[KICK] Yayın bitti`);
+        kickWasLive = false;
+      } else if (msg.event === 'pusher:ping') {
+        ws.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
+      }
+    });
+
+    ws.on('close', (code) => {
+      console.log(`[KICK] Pusher bağlantısı kapandı (${code}), ${reconnectDelay/1000}sn sonra yeniden bağlanılıyor`);
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 60000);
+    });
+
+    ws.on('error', (e) => {
+      console.error(`[KICK] Pusher hatası: ${e.message}`);
+    });
+  }
+
+  connect();
+}
+
+// Eski polling (artık kullanılmıyor, geriye dönük uyumluluk)
+async function checkKick() {}
 
 /* =========================
    GEMİNİ
@@ -1802,8 +1825,7 @@ const client = new Client({
 
 client.once("ready", async () => {
   console.log(`[BOT] ${client.user.tag} hazır`);
-  setInterval(checkKick, 2 * 60 * 1000);
-  checkKick();
+  startKickPusher();
 
   await client.application.commands.set(SLASH_COMMANDS);
   console.log('[BOT] Slash komutları kaydedildi');
