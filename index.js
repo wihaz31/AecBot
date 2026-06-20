@@ -995,6 +995,7 @@ async function checkBirthdays() {
     const reminderKey = `${uid}-${tomorrow.year}`;
     if (sentReminders[reminderKey]) continue; // bu yıl zaten gönderildi
     sentReminders[reminderKey] = true;
+    redisSet("bdaySent", { reminders: sentReminders, celebrations: sentCelebrations });
     const name = info.name || "birinin";
     console.log(`[BDAY] Yarın ${name} doğum günü, reminder gönderiliyor...`);
     for (const [otherId] of entries) {
@@ -1013,6 +1014,7 @@ async function checkBirthdays() {
     const celebKey = `${uid}-${today.year}`;
     if (sentCelebrations[celebKey]) continue; // bu yıl zaten kutlandı
     sentCelebrations[celebKey] = true;
+    redisSet("bdaySent", { reminders: sentReminders, celebrations: sentCelebrations });
     const channel = await findAnnounceChannel(info.guildId);
     if (channel) {
       try {
@@ -1671,7 +1673,7 @@ client.once("ready", async () => {
   setInterval(checkBirthdays, 60 * 60 * 1000);
   setTimeout(checkBirthdays, 10 * 1000);
 
-  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun, savedGuildConfig, savedSeed, savedRoleMenus] = await Promise.all([
+  const [savedEconomy, savedInventory, savedBirthdays, savedBdayRun, savedGuildConfig, savedSeed, savedRoleMenus, savedBdaySent] = await Promise.all([
     redisGet("economy"),
     redisGet("inventory"),
     redisGet("birthdays"),
@@ -1679,6 +1681,7 @@ client.once("ready", async () => {
     redisGet("guildConfig"),
     redisGet("seedMemory"),
     redisGet("roleMenus"),
+    redisGet("bdaySent"),
   ]);
   if (savedGuildConfig) {
     guildConfig = savedGuildConfig;
@@ -1690,6 +1693,11 @@ client.once("ready", async () => {
     console.log(`[DOĞUMGÜNÜ] ${Object.keys(birthdays).length} kayıt yüklendi`);
   }
   if (savedBdayRun) birthdayLastRun = savedBdayRun;
+  if (savedBdaySent) {
+    sentReminders = savedBdaySent.reminders || {};
+    sentCelebrations = savedBdaySent.celebrations || {};
+    console.log(`[DOĞUMGÜNÜ] ${Object.keys(sentReminders).length} reminder, ${Object.keys(sentCelebrations).length} kutlama kaydı yüklendi`);
+  }
   if (savedRoleMenus) {
     roleMenus = savedRoleMenus;
     console.log(`[ROLLER] ${Object.keys(roleMenus).length} rol menüsü yüklendi`);
