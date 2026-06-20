@@ -911,7 +911,11 @@ function buildRoleMenuContent(title, roles) {
 
 // birthdays: { userId: { date: "GG-AA", name, guildId } }
 let birthdays = {};
-let birthdayLastRun = null;
+let birthdayLastRun = null; // artık kullanılmıyor, geriye dönük uyumluluk için tutuldu
+// sentReminders: { "userId-YYYY": true } — yılda bir kez reminder için
+// sentCelebrations: { "userId-YYYY": true } — yılda bir kez kutlama için
+let sentReminders = {};
+let sentCelebrations = {};
 
 let birthdaySaveTimer = null;
 function saveBirthdays() {
@@ -977,24 +981,24 @@ async function findAnnounceChannel(guildId) {
 }
 
 async function checkBirthdays() {
-  if (Object.keys(birthdays).length === 0) { console.log('[BDAY] Kayıt yok, atlandı'); return; }
+  if (Object.keys(birthdays).length === 0) return;
 
   const today = trDayMonth(0);
   const tomorrow = trDayMonth(1);
-  const dayKey = `${today.year}-${today.key}`;
-  console.log(`[BDAY] Kontrol: bugün=${today.key} yarın=${tomorrow.key} lastRun=${birthdayLastRun}`);
-  if (birthdayLastRun === dayKey) { console.log('[BDAY] Bugün zaten çalıştı, atlandı'); return; }
-  birthdayLastRun = dayKey;
-  redisSet("birthdayLastRun", dayKey);
+  console.log(`[BDAY] Kontrol: bugün=${today.key} yarın=${tomorrow.key}`);
 
   const entries = Object.entries(birthdays);
 
-  // 1. Yarın doğum günü olanlar -> diğer kayıtlı kullanıcılara DM
+  // 1. Yarın doğum günü olanlar -> diğer kayıtlı kullanıcılara DM (yılda bir)
   const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
   for (const [uid, info] of tomorrowPeople) {
+    const reminderKey = `${uid}-${tomorrow.year}`;
+    if (sentReminders[reminderKey]) continue; // bu yıl zaten gönderildi
+    sentReminders[reminderKey] = true;
     const name = info.name || "birinin";
+    console.log(`[BDAY] Yarın ${name} doğum günü, reminder gönderiliyor...`);
     for (const [otherId] of entries) {
-      if (otherId === uid) continue; // doğum günü olan kişiye atma
+      if (otherId === uid) continue;
       try {
         const user = await client.users.fetch(otherId);
         await user.send(`🎂 Yarın **${name}**'in doğum günü! Kutlamayı unutma 🎉`);
@@ -1003,9 +1007,12 @@ async function checkBirthdays() {
     }
   }
 
-  // 2. Bugün doğum günü olanlar -> sohbet kanalına kutlama
+  // 2. Bugün doğum günü olanlar -> sohbet kanalına kutlama (yılda bir)
   const todayPeople = entries.filter(([, b]) => b.date === today.key);
   for (const [uid, info] of todayPeople) {
+    const celebKey = `${uid}-${today.year}`;
+    if (sentCelebrations[celebKey]) continue; // bu yıl zaten kutlandı
+    sentCelebrations[celebKey] = true;
     const channel = await findAnnounceChannel(info.guildId);
     if (channel) {
       try {
@@ -2310,7 +2317,6 @@ client.on('interactionCreate', async (interaction) => {
         guildId: interaction.guildId,
       };
       saveBirthdays();
-      birthdayLastRun = null; // yeni ekleme sonrası bir sonraki saatte tekrar kontrol et
       const who = target.id === interaction.user.id ? 'Senin doğum günün' : `<@${target.id}> için doğum günü`;
       await interaction.reply({ content: `🎂 ${who} kaydedildi: **${formatBirthday(date)}**`, allowedMentions: { parse: [] } });
       return;
@@ -2566,22 +2572,25 @@ client.on("messageCreate", async (message) => {
     if (lower === "*bday test") {
       const today = trDayMonth(0);
       const tomorrow = trDayMonth(1);
-      const dayKey = `${today.year}-${today.key}`;
       const entries = Object.entries(birthdays);
       const tomorrowPeople = entries.filter(([, b]) => b.date === tomorrow.key);
       const todayPeople = entries.filter(([, b]) => b.date === today.key);
+      const remKey = tomorrowPeople.map(([uid]) => `${uid}-${tomorrow.year}`);
+      const celKey = todayPeople.map(([uid]) => `${uid}-${today.year}`);
       await message.reply(
         `📅 Bugün: ${today.key} | Yarın: ${tomorrow.key}\n` +
-        `birthdayLastRun: ${birthdayLastRun ?? 'null'} | dayKey: ${dayKey}\n` +
         `Toplam kayıt: ${entries.length}\n` +
-        `Yarın doğum günü olanlar: ${tomorrowPeople.map(([, b]) => b.name).join(', ') || 'yok'}\n` +
-        `Bugün doğum günü olanlar: ${todayPeople.map(([, b]) => b.name).join(', ') || 'yok'}`
+        `Yarın doğum günü: ${tomorrowPeople.map(([, b]) => b.name).join(', ') || 'yok'}\n` +
+        `Reminder gönderildi mi: ${remKey.map(k => `${k}=${!!sentReminders[k]}`).join(', ') || '-'}\n` +
+        `Bugün doğum günü: ${todayPeople.map(([, b]) => b.name).join(', ') || 'yok'}\n` +
+        `Kutlama gönderildi mi: ${celKey.map(k => `${k}=${!!sentCelebrations[k]}`).join(', ') || '-'}`
       );
       return;
     }
     if (lower === "*bday run") {
-      birthdayLastRun = null;
-      await message.reply("birthdayLastRun sıfırlandı, checkBirthdays çalıştırılıyor...");
+      sentReminders = {};
+      sentCelebrations = {};
+      await message.reply("sentReminders/Celebrations sıfırlandı, checkBirthdays çalıştırılıyor...");
       await checkBirthdays();
       await message.reply("checkBirthdays tamamlandı.");
       return;
