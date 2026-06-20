@@ -1155,29 +1155,49 @@ async function checkBirthdays() {
 let kickWasLive = false;
 
 async function checkKick() {
-  try {
-    const r = await fetchWithTimeout(
-      `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
-      { headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0" } },
-      8000
-    );
-    if (!r.ok) return;
-    const ct = r.headers.get("content-type") || "";
-    if (!ct.includes("json")) return;
-    const data = await r.json();
-    const isLive = !!data.livestream;
-    if (isLive && !kickWasLive) {
-      kickWasLive = true;
-      try {
-        const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
-        if (ch?.isTextBased()) {
-          await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
-        }
-      } catch {}
-    } else if (!isLive) {
-      kickWasLive = false;
+  const ENDPOINTS = [
+    `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
+    `https://kick.com/api/internal/v2/channels/${KICK_CHANNEL_SLUG}`,
+    `https://kick.com/api/v1/channels/${KICK_CHANNEL_SLUG}`,
+  ];
+  const HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8",
+    "Referer": "https://kick.com/",
+    "Origin": "https://kick.com",
+  };
+
+  let data = null;
+  for (const url of ENDPOINTS) {
+    try {
+      const r = await fetchWithTimeout(url, { headers: HEADERS }, 8000);
+      const ct = r.headers.get("content-type") || "";
+      if (!r.ok) { console.log(`[KICK] ${url} → ${r.status}`); continue; }
+      if (!ct.includes("json")) { console.log(`[KICK] ${url} → JSON değil (${ct})`); continue; }
+      data = await r.json();
+      break;
+    } catch (e) {
+      console.log(`[KICK] ${url} → hata: ${e.message?.slice(0, 60)}`);
     }
-  } catch {}
+  }
+
+  if (!data) return;
+
+  const isLive = !!(data.livestream || data.is_live || data.channel?.is_live);
+  if (isLive && !kickWasLive) {
+    kickWasLive = true;
+    try {
+      const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
+      if (ch?.isTextBased()) {
+        await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
+      }
+    } catch {}
+    console.log(`[KICK] Yayın başladı, bildirim gönderildi`);
+  } else if (!isLive) {
+    if (kickWasLive) console.log(`[KICK] Yayın bitti`);
+    kickWasLive = false;
+  }
 }
 
 /* =========================
@@ -2746,6 +2766,35 @@ client.on("messageCreate", async (message) => {
       await message.reply("sentReminders/Celebrations sıfırlandı, checkBirthdays çalıştırılıyor...");
       await checkBirthdays();
       await message.reply("checkBirthdays tamamlandı.");
+      return;
+    }
+    if (lower === "*kick test") {
+      const ENDPOINTS = [
+        `https://kick.com/api/v2/channels/${KICK_CHANNEL_SLUG}`,
+        `https://kick.com/api/internal/v2/channels/${KICK_CHANNEL_SLUG}`,
+        `https://kick.com/api/v1/channels/${KICK_CHANNEL_SLUG}`,
+      ];
+      const HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://kick.com/",
+      };
+      const results = [];
+      for (const url of ENDPOINTS) {
+        try {
+          const r = await fetchWithTimeout(url, { headers: HEADERS }, 8000);
+          const ct = r.headers.get("content-type") || "";
+          if (!r.ok) { results.push(`❌ ${url.split('/').slice(-2).join('/')} → ${r.status}`); continue; }
+          if (!ct.includes("json")) { results.push(`⚠️ ${url.split('/').slice(-2).join('/')} → JSON değil`); continue; }
+          const data = await r.json();
+          const isLive = !!(data.livestream || data.is_live || data.channel?.is_live);
+          results.push(`✅ ${url.split('/').slice(-2).join('/')} → ${isLive ? '🔴 CANLI' : '⚫ offline'}`);
+        } catch (e) {
+          results.push(`❌ ${url.split('/').slice(-2).join('/')} → ${e.message?.slice(0, 40)}`);
+        }
+      }
+      results.push(`kickWasLive: ${kickWasLive}`);
+      await message.reply(results.join('\n'));
       return;
     }
     if (lower === "*redis test") {
