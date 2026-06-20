@@ -5,9 +5,11 @@ dns.setDefaultResultOrder("ipv4first");
 
 const http = require("http");
 const { URL } = require("url");
-const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, AttachmentBuilder } = require("discord.js");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const playdl = require("play-dl");
+const { createCanvas } = require('canvas');
+const GIFEncoder = require('gif-encoder-2');
 const { spawn } = require("child_process");
 const fs = require("fs");
 
@@ -430,6 +432,132 @@ function parseBet(str, userId) {
   if (isNaN(n) || n <= 0) return null;
   if (n > bal) return null;
   return n;
+}
+
+/* =========================
+   ÇARK ÇEVİRİCİ
+========================= */
+const WHEEL_COLORS = [
+  '#FF6B6B','#FFD93D','#6BCB77','#4D96FF','#FF6BBF',
+  '#FF9F43','#54A0FF','#A29BFE','#00D2D3','#FD79A8',
+  '#55EFC4','#FDCB6E','#74B9FF','#E17055','#81ECEC',
+  '#FAB1A0','#B2BEC3','#00B894','#E84393','#6C5CE7',
+];
+
+function drawWheelFrame(ctx, options, rotation, size) {
+  const n = options.length;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - 20;
+
+  ctx.fillStyle = '#23272A';
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < n; i++) {
+    const startAngle = rotation + (i / n) * Math.PI * 2 - Math.PI / 2;
+    const endAngle   = rotation + ((i + 1) / n) * Math.PI * 2 - Math.PI / 2;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, startAngle, endAngle);
+    ctx.closePath();
+    ctx.fillStyle = WHEEL_COLORS[i % WHEEL_COLORS.length];
+    ctx.fill();
+    ctx.strokeStyle = '#23272A';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const midAngle = (startAngle + endAngle) / 2;
+    const textR = r * 0.68;
+    const tx = cx + Math.cos(midAngle) * textR;
+    const ty = cy + Math.sin(midAngle) * textR;
+    const fontSize = Math.max(9, Math.min(15, Math.floor(600 / n / options[i].length * 2.5)));
+
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.rotate(midAngle + Math.PI / 2);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 3;
+    const maxLen = Math.max(6, Math.floor(r * Math.PI / n / fontSize * 1.6));
+    const label = options[i].length > maxLen ? options[i].slice(0, maxLen - 1) + '…' : options[i];
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  }
+
+  // Dış çember
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = '#99AAB5';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Merkez
+  ctx.beginPath();
+  ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  ctx.strokeStyle = '#23272A';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Ok (üstte)
+  ctx.beginPath();
+  ctx.moveTo(cx, 4);
+  ctx.lineTo(cx - 13, 28);
+  ctx.lineTo(cx + 13, 28);
+  ctx.closePath();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = 4;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#23272A';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+async function generateWheelGif(options, winnerIdx) {
+  const size = 420;
+  const n = options.length;
+  const FRAMES = 45;
+
+  // Ok üstte (-π/2). winnerIdx segmentinin ortası ok altına gelsin:
+  // segMid = (winnerIdx + 0.5) / n * 2π
+  // rotation + segMid - π/2 = 0 → rotation = π/2 - segMid
+  const winnerRotation = Math.PI / 2 - (winnerIdx + 0.5) / n * Math.PI * 2;
+  const totalRotation = winnerRotation + 8 * Math.PI * 2; // 8 tam tur + kazanan açısı
+
+  const encoder = new GIFEncoder(size, size, 'octree', false);
+  encoder.setRepeat(-1); // bir kez oyna
+  encoder.start();
+
+  const canvas = createCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+
+  for (let f = 0; f <= FRAMES; f++) {
+    const t = f / FRAMES;
+    // Ease-out cubic
+    const eased = 1 - Math.pow(1 - t, 3);
+    const rotation = totalRotation * eased;
+
+    // Gecikme: hızlıdan yavaşa (ms)
+    let delay;
+    if (t < 0.5) delay = 30;
+    else if (t < 0.75) delay = 30 + Math.round(120 * ((t - 0.5) / 0.25));
+    else delay = 150 + Math.round(150 * ((t - 0.75) / 0.25));
+    if (f === FRAMES) delay = 2000; // son karede dur
+
+    encoder.setDelay(delay);
+    drawWheelFrame(ctx, options, rotation, size);
+    encoder.addFrame(ctx);
+  }
+
+  encoder.finish();
+  return Buffer.from(encoder.out.getData());
 }
 
 /* =========================
@@ -1542,6 +1670,9 @@ const SLASH_COMMANDS = [
       },
     ],
   },
+  { name: 'çark', description: 'Çark çevir ve rastgele seç', options: [
+    { name: 'seçenekler', description: 'Virgülle ayır: Pizza, Burger, Sushi', type: ApplicationCommandOptionType.String, required: true },
+  ]},
   { name: 'seed-yenile', description: 'Seed kanallarını sıfırdan tara ve Markov modelini yenile (yönetici)', defaultMemberPermissions: String(PermissionFlagsBits.ManageGuild) },
   { name: 'yardım', description: 'Komut listesi' },
 ];
@@ -2385,6 +2516,19 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: `**Sunucu Ayarları**\nSohbet/kutlama: ${sohbet}\nÖğrenme (seed): ${seed}`, flags: 64 });
       return;
     }
+    return;
+  }
+
+  if (cmd === 'çark') {
+    const raw = interaction.options.getString('seçenekler');
+    const options = raw.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+    if (options.length < 2) { await interaction.reply({ content: 'En az 2 seçenek gir. Virgülle ayır: `Pizza, Burger, Sushi`', flags: 64 }); return; }
+    if (options.length > 20) { await interaction.reply({ content: 'En fazla 20 seçenek girebilirsin.', flags: 64 }); return; }
+    await interaction.deferReply();
+    const winnerIdx = Math.floor(Math.random() * options.length);
+    const gif = await generateWheelGif(options, winnerIdx);
+    const attachment = new AttachmentBuilder(gif, { name: 'cark.gif' });
+    await interaction.editReply({ content: `🎡 **${options[winnerIdx]}** seçildi!`, files: [attachment] });
     return;
   }
 
