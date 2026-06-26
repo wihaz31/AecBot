@@ -8,7 +8,8 @@ const { URL } = require("url");
 const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, AttachmentBuilder } = require("discord.js");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const playdl = require("play-dl");
-const { createCanvas } = require('canvas');
+const { createCanvas, registerFont } = require('canvas');
+registerFont('/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', { family: 'NotoEmoji' });
 const GIFEncoder = require('gif-encoder-2');
 const ffmpegStatic = require('ffmpeg-static');
 const os = require('os');
@@ -552,6 +553,150 @@ async function generateWheelGif(options, winnerIdx) {
 
     encoder.setDelay(delay);
     drawWheelFrame(ctx, options, rotation, size);
+    encoder.addFrame(ctx);
+  }
+
+  encoder.finish();
+  return Buffer.from(encoder.out.getData());
+}
+
+async function generateSlotGif(finalReels, resultType, delta, newBalance) {
+  const W = 440, H = 210;
+  const encoder = new GIFEncoder(W, H, 'neuquant', false);
+  encoder.setQuality(6);
+  encoder.setRepeat(-1);
+  encoder.start();
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+
+  const ALL_SYMS = ['🍒','🍋','🍊','🍇','🔔','⭐','💎','7️⃣'];
+  const CELL = 108;
+  const GAP = 12;
+  const startX = Math.floor((W - 3 * CELL - 2 * GAP) / 2);
+  const cellY = 58;
+
+  // Frame at which each reel stops (0-indexed)
+  const STOP = [26, 36, 46];
+  const TOTAL = 60;
+
+  // Spin offsets staggered for variety
+  const spinIdx = [0, 3, 5];
+
+  function drawFrame(f) {
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#1a0a2e');
+    grad.addColorStop(1, '#0d0520');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Decorative top stripe
+    ctx.fillStyle = '#ffd700';
+    ctx.fillRect(0, 0, W, 4);
+    ctx.fillRect(0, H - 4, W, 4);
+
+    // Header
+    ctx.font = 'bold 24px "NotoEmoji", sans-serif';
+    ctx.fillStyle = '#ffd700';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#ff8800';
+    ctx.shadowBlur = 10;
+    ctx.fillText('🎰  SLOT MAKİNESİ', W / 2, 28);
+    ctx.shadowBlur = 0;
+
+    for (let r = 0; r < 3; r++) {
+      const x = startX + r * (CELL + GAP);
+      const stopped = f >= STOP[r];
+
+      if (!stopped && f % 2 === 0) {
+        spinIdx[r] = (spinIdx[r] + 1) % ALL_SYMS.length;
+      }
+
+      const sym = stopped ? finalReels[r] : ALL_SYMS[spinIdx[r]];
+
+      // Cell shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(x + 4, cellY + 4, CELL, CELL);
+
+      // Cell background
+      if (stopped) {
+        const cellGrad = ctx.createLinearGradient(x, cellY, x, cellY + CELL);
+        cellGrad.addColorStop(0, '#0a3060');
+        cellGrad.addColorStop(1, '#051a3a');
+        ctx.fillStyle = cellGrad;
+      } else {
+        ctx.fillStyle = '#1a1040';
+      }
+      ctx.fillRect(x, cellY, CELL, CELL);
+
+      // Border
+      ctx.strokeStyle = stopped ? '#ffd700' : '#553388';
+      ctx.lineWidth = stopped ? 3 : 1.5;
+      ctx.strokeRect(x, cellY, CELL, CELL);
+
+      // Inner highlight line (top) for stopped reels
+      if (stopped) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 4, cellY + 4);
+        ctx.lineTo(x + CELL - 4, cellY + 4);
+        ctx.stroke();
+      }
+
+      // Symbol
+      ctx.font = '62px "NotoEmoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = stopped ? 'rgba(255,215,0,0.5)' : 'transparent';
+      ctx.shadowBlur = stopped ? 8 : 0;
+      ctx.fillText(sym, x + CELL / 2, cellY + CELL / 2 + 2);
+      ctx.shadowBlur = 0;
+    }
+
+    // Win overlay flash (blink on triple win)
+    if (resultType === 'triple' && f >= STOP[2] && f % 6 < 3) {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.07)';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Result text (after all reels stopped)
+    if (f >= STOP[2]) {
+      let resultText, resultColor;
+      if (resultType === 'triple') {
+        resultText = `🎉  +${delta} 🪙  ›  Bakiye: ${newBalance} 🪙`;
+        resultColor = '#00ee88';
+      } else if (resultType === 'pair') {
+        resultText = `🤝  Para iade  ›  Bakiye: ${newBalance} 🪙`;
+        resultColor = '#ffdd44';
+      } else {
+        resultText = `💸  -${Math.abs(delta)} 🪙  ›  Bakiye: ${newBalance} 🪙`;
+        resultColor = '#ff5555';
+      }
+      ctx.font = 'bold 19px "NotoEmoji", sans-serif';
+      ctx.fillStyle = resultColor;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = resultColor;
+      ctx.shadowBlur = 6;
+      ctx.fillText(resultText, W / 2, cellY + CELL + 26);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  for (let f = 0; f < TOTAL; f++) {
+    let delay;
+    if (f < STOP[0])        delay = 55;
+    else if (f < STOP[1])   delay = 60;
+    else if (f < STOP[2])   delay = 65;
+    else if (f === TOTAL - 1) delay = 2500;
+    else                    delay = 80;
+
+    encoder.setDelay(delay);
+    drawFrame(f);
     encoder.addFrame(ctx);
   }
 
@@ -2225,6 +2370,7 @@ client.on('interactionCreate', async (interaction) => {
   if (cmd === 'slot') {
     const bet = parseBet(interaction.options.getString('miktar'), interaction.user.id);
     if (!bet) { await interaction.reply(`geçersiz miktar. bakiyen: ${getBalance(interaction.user.id)} 🪙`); return; }
+    await interaction.deferReply();
     const symbols = [
       { e: '🍒', w: 30 }, { e: '🍋', w: 25 }, { e: '🍊', w: 20 },
       { e: '🍇', w: 15 }, { e: '🔔', w: 6 }, { e: '⭐', w: 3 },
@@ -2237,23 +2383,32 @@ client.on('interactionCreate', async (interaction) => {
       return symbols[0].e;
     }
     const reels = [spin(), spin(), spin()];
-    const line = reels.join(' | ');
     const bal = getBalance(interaction.user.id);
-    let result, delta;
+    let resultType, delta, caption;
     if (reels[0] === reels[1] && reels[1] === reels[2]) {
       const mult = reels[0] === '💎' ? 20 : reels[0] === '7️⃣' ? 10 : reels[0] === '⭐' ? 5 : reels[0] === '🔔' ? 4 : 3;
       delta = bet * mult - bet;
       setBalance(interaction.user.id, bal + delta);
-      result = `🎉 üçlü! x${mult} → +${delta} 🪙`;
+      resultType = 'triple';
+      caption = `🎉 **Üçlü! x${mult}** — +${delta} 🪙 | Bakiye: ${getBalance(interaction.user.id)} 🪙`;
     } else if (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]) {
       delta = 0;
-      result = 'ikili — para iade';
+      resultType = 'pair';
+      caption = `🤝 **İkili** — para iade | Bakiye: ${getBalance(interaction.user.id)} 🪙`;
     } else {
       delta = -bet;
       setBalance(interaction.user.id, bal - bet);
-      result = `-${bet} 🪙`;
+      resultType = 'loss';
+      caption = `💸 **Kaybettin** — -${bet} 🪙 | Bakiye: ${getBalance(interaction.user.id)} 🪙`;
     }
-    await interaction.reply(`[ ${line} ]\n${result} | Bakiye: ${getBalance(interaction.user.id)} 🪙`);
+    try {
+      const gif = await generateSlotGif(reels, resultType, delta, getBalance(interaction.user.id));
+      const att = new AttachmentBuilder(gif, { name: 'slot.gif' });
+      await interaction.editReply({ content: caption, files: [att] });
+    } catch (err) {
+      console.error('[SLOT GIF]', err);
+      await interaction.editReply(caption);
+    }
     return;
   }
 
