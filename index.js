@@ -1303,7 +1303,9 @@ let kickWasLive = false;
 
 async function sendKickNotification() {
   try {
-    const ch = await client.channels.fetch(KICK_NOTIFY_CHANNEL_ID);
+    // /ayar kick ile ayarlanan kanal öncelikli, yoksa varsayılan
+    const configured = Object.values(guildConfig).find(c => c.kickNotifyChannelId)?.kickNotifyChannelId;
+    const ch = await client.channels.fetch(configured || KICK_NOTIFY_CHANNEL_ID);
     if (ch?.isTextBased()) {
       await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
     }
@@ -1811,6 +1813,12 @@ const SLASH_COMMANDS = [
       {
         name: 'seed',
         description: 'Öğrenme (seed) kanalını ayarla',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true, channelTypes: [ChannelType.GuildText] }],
+      },
+      {
+        name: 'kick',
+        description: 'Kick yayın bildirimi kanalını ayarla',
         type: ApplicationCommandOptionType.Subcommand,
         options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true, channelTypes: [ChannelType.GuildText] }],
       },
@@ -2693,21 +2701,24 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     const sub = interaction.options.getSubcommand();
-    if (sub === 'sohbet' || sub === 'seed') {
+    if (sub === 'sohbet' || sub === 'seed' || sub === 'kick') {
       const channel = interaction.options.getChannel('kanal');
       if (!channel?.isTextBased?.()) { await interaction.reply({ content: 'Metin kanalı seç.', flags: 64 }); return; }
       if (!guildConfig[interaction.guildId]) guildConfig[interaction.guildId] = {};
+      const labels = { sohbet: 'Sohbet/kutlama', seed: 'Öğrenme (seed)', kick: 'Kick yayın bildirimi' };
       if (sub === 'sohbet') guildConfig[interaction.guildId].sohbetChannelId = channel.id;
-      else guildConfig[interaction.guildId].seedChannelId = channel.id;
+      else if (sub === 'seed') guildConfig[interaction.guildId].seedChannelId = channel.id;
+      else guildConfig[interaction.guildId].kickNotifyChannelId = channel.id;
       saveGuildConfig();
-      await interaction.reply({ content: `✅ ${sub === 'sohbet' ? 'Sohbet/kutlama' : 'Öğrenme (seed)'} kanalı <#${channel.id}> olarak ayarlandı.`, flags: 64 });
+      await interaction.reply({ content: `✅ ${labels[sub]} kanalı <#${channel.id}> olarak ayarlandı.`, flags: 64 });
       return;
     }
     if (sub === 'göster') {
       const cfg = guildConfig[interaction.guildId] || {};
       const sohbet = cfg.sohbetChannelId ? `<#${cfg.sohbetChannelId}>` : '_ayarlanmamış_';
       const seed = cfg.seedChannelId ? `<#${cfg.seedChannelId}>` : '_ayarlanmamış_';
-      await interaction.reply({ content: `**Sunucu Ayarları**\nSohbet/kutlama: ${sohbet}\nÖğrenme (seed): ${seed}`, flags: 64 });
+      const kick = cfg.kickNotifyChannelId ? `<#${cfg.kickNotifyChannelId}>` : `_varsayılan_ (<#${KICK_NOTIFY_CHANNEL_ID}>)`;
+      await interaction.reply({ content: `**Sunucu Ayarları**\nSohbet/kutlama: ${sohbet}\nÖğrenme (seed): ${seed}\nKick bildirimi: ${kick}`, flags: 64 });
       return;
     }
     return;
