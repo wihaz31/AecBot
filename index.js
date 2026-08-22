@@ -49,7 +49,7 @@ const CMD_KEY = process.env.CMD_KEY || "";
 
 // Kick
 const KICK_CHANNEL_SLUG = "zeitnot";
-const KICK_NOTIFY_CHANNEL_ID = "705537838770421761";
+const KICK_NOTIFY_CHANNEL_ID = process.env.KICK_NOTIFY_CHANNEL_ID || "705537838770421761";
 // Kick Pusher kanal ID — kick.com/zeitnot sayfasında F12 > Network > zeitnot isteği > JSON'daki "id"
 const KICK_CHANNEL_ID = process.env.KICK_CHANNEL_ID || "";
 
