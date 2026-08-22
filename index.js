@@ -1301,17 +1301,32 @@ async function checkBirthdays() {
 ========================= */
 let kickWasLive = false;
 
+// Bildirim gönderilecek kanalları belirle:
+//  - kickNotifyChannelId dolu olan her sunucuya gönderilir
+//  - kickNotifyChannelId === false olan sunucu bildirimi kapatmıştır
+//  - hiçbir sunucu ayar yapmamışsa eski sabit kanala düşülür (geriye dönük uyum)
+function kickNotifyTargets() {
+  const ids = Object.values(guildConfig)
+    .map(c => c.kickNotifyChannelId)
+    .filter(id => typeof id === 'string' && id);
+  if (ids.length) return ids;
+  const optedOut = Object.values(guildConfig).some(c => c.kickNotifyChannelId === false);
+  return optedOut ? [] : [KICK_NOTIFY_CHANNEL_ID];
+}
+
 async function sendKickNotification() {
-  try {
-    // /ayar kick ile ayarlanan kanal öncelikli, yoksa varsayılan
-    const configured = Object.values(guildConfig).find(c => c.kickNotifyChannelId)?.kickNotifyChannelId;
-    const ch = await client.channels.fetch(configured || KICK_NOTIFY_CHANNEL_ID);
-    if (ch?.isTextBased()) {
-      await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
+  const targets = kickNotifyTargets();
+  if (!targets.length) { console.log(`[KICK] Bildirim kanalı yok, gönderilmedi`); return; }
+  for (const id of targets) {
+    try {
+      const ch = await client.channels.fetch(id);
+      if (ch?.isTextBased()) {
+        await ch.send(`🔴 **Dünya çapında ADC Berkay Zeitnot Aşıkuzun şimdi yayında!**\nhttps://kick.com/${KICK_CHANNEL_SLUG}`);
+        console.log(`[KICK] Bildirim gönderildi: #${ch.name}`);
+      }
+    } catch (e) {
+      console.error(`[KICK] Bildirim hatası (${id}): ${e.message}`);
     }
-    console.log(`[KICK] Bildirim gönderildi`);
-  } catch (e) {
-    console.error(`[KICK] Bildirim hatası: ${e.message}`);
   }
 }
 
@@ -1822,6 +1837,7 @@ const SLASH_COMMANDS = [
         type: ApplicationCommandOptionType.Subcommand,
         options: [{ name: 'kanal', description: 'Kanal', type: ApplicationCommandOptionType.Channel, required: true, channelTypes: [ChannelType.GuildText] }],
       },
+      { name: 'kick-kapat', description: 'Bu sunucuda Kick yayın bildirimini kapat', type: ApplicationCommandOptionType.Subcommand },
       { name: 'göster', description: 'Mevcut ayarları göster', type: ApplicationCommandOptionType.Subcommand },
     ],
   },
@@ -2713,11 +2729,22 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: `✅ ${labels[sub]} kanalı <#${channel.id}> olarak ayarlandı.`, flags: 64 });
       return;
     }
+    if (sub === 'kick-kapat') {
+      if (!guildConfig[interaction.guildId]) guildConfig[interaction.guildId] = {};
+      guildConfig[interaction.guildId].kickNotifyChannelId = false;
+      saveGuildConfig();
+      await interaction.reply({ content: '🔕 Bu sunucuda Kick yayın bildirimi kapatıldı.', flags: 64 });
+      return;
+    }
     if (sub === 'göster') {
       const cfg = guildConfig[interaction.guildId] || {};
       const sohbet = cfg.sohbetChannelId ? `<#${cfg.sohbetChannelId}>` : '_ayarlanmamış_';
       const seed = cfg.seedChannelId ? `<#${cfg.seedChannelId}>` : '_ayarlanmamış_';
-      const kick = cfg.kickNotifyChannelId ? `<#${cfg.kickNotifyChannelId}>` : `_varsayılan_ (<#${KICK_NOTIFY_CHANNEL_ID}>)`;
+      const kick = cfg.kickNotifyChannelId === false
+        ? '_kapalı_'
+        : cfg.kickNotifyChannelId
+          ? `<#${cfg.kickNotifyChannelId}>`
+          : `_ayarlanmamış_`;
       await interaction.reply({ content: `**Sunucu Ayarları**\nSohbet/kutlama: ${sohbet}\nÖğrenme (seed): ${seed}\nKick bildirimi: ${kick}`, flags: 64 });
       return;
     }
