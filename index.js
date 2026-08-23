@@ -9,12 +9,36 @@ const { Client, GatewayIntentBits, Partials, ApplicationCommandOptionType, Actio
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const playdl = require("play-dl");
 const { createCanvas, registerFont } = require('canvas');
-registerFont('/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', { family: 'NotoEmoji' });
 const GIFEncoder = require('gif-encoder-2');
 const ffmpegStatic = require('ffmpeg-static');
 const os = require('os');
 const { spawn } = require("child_process");
 const fs = require("fs");
+
+// Emoji fontu — sunucuda kurulu olmayabilir. Bulunamazsa emoji'ler kutu
+// olarak çizilir ama bot açılmaya devam eder (font hatası botu düşürmemeli).
+const EMOJI_FONT_PATHS = [
+  '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',
+  '/usr/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf',
+  '/usr/share/fonts/noto/NotoColorEmoji.ttf',
+  '/usr/share/fonts/truetype/noto-color-emoji/NotoColorEmoji.ttf',
+];
+let emojiFontLoaded = false;
+for (const p of EMOJI_FONT_PATHS) {
+  try {
+    if (!fs.existsSync(p)) continue;
+    registerFont(p, { family: 'NotoEmoji' });
+    emojiFontLoaded = true;
+    console.log(`[FONT] Emoji fontu yüklendi: ${p}`);
+    break;
+  } catch (e) {
+    console.log(`[FONT] ${p} yüklenemedi: ${e.message}`);
+  }
+}
+if (!emojiFontLoaded) {
+  console.log('[FONT] Emoji fontu bulunamadı — GIF\'lerde emoji düz görünebilir.');
+  console.log('[FONT] Kurmak için: apt-get install -y fonts-noto-color-emoji');
+}
 
 /* =========================
    AYARLAR
